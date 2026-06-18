@@ -1141,6 +1141,24 @@ body{background:var(--bg)}
 .cx-resumo{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;background:var(--grs);border:1px solid var(--grb);border-radius:9px;padding:11px 16px;font-size:12.5px}
 .cx-vazio{text-align:center;color:var(--t3);font-size:12px;font-style:italic;padding:10px 0}
 
+/* ═══ IMPORTAÇÃO EM MASSA ═══ */
+.import-drop-zone{
+  border:2px dashed var(--bd2);border-radius:10px;padding:28px;
+  text-align:center;cursor:pointer;transition:.2s;background:var(--s2);
+}
+.import-drop-zone:hover,.import-drop-zone.drag{
+  border-color:var(--bl);background:var(--bls);
+}
+.idz-inner{pointer-events:none}
+.link-btn{color:var(--bl);cursor:pointer;font-weight:600;text-decoration:underline;pointer-events:auto}
+.link-btn:hover{color:var(--bl2)}
+.import-table{width:100%;border-collapse:collapse;font-size:12px}
+.import-table th{background:var(--s3);padding:6px 10px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;border-bottom:1px solid var(--bd)}
+.import-table td{padding:7px 10px;border-bottom:1px solid var(--bd);color:var(--tx)}
+.import-table tr:hover td{background:var(--s2)}
+.import-table .td-skip{color:var(--rd);font-size:10px}
+.import-table .td-ok{color:var(--gr);font-size:10px}
+
 </style>
 </head>
 <body>
@@ -1262,6 +1280,9 @@ body{background:var(--bg)}
               <span class="cm-search-icon">⌕</span>
               <input id="catItemSearch" class="cm-search" placeholder="Buscar por modelo, fabricante..." oninput="renderItemList()">
             </div>
+            <button class="btn" onclick="openImportModal()" title="Importar lista do Excel/CSV" style="gap:6px">
+              ↑ Importar lista
+            </button>
             <button class="btn primary" onclick="openItemForm()">+ Novo equipamento</button>
           </div>
           <div id="catItemList" class="cat-item-list"></div>
@@ -1321,6 +1342,71 @@ body{background:var(--bg)}
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- MODAL IMPORTAR LISTA -->
+<div class="overlay" id="modalImport">
+  <div class="modal" style="max-width:560px">
+    <h3>↑ Importar lista em massa</h3>
+    <div class="msub">Importe vários itens de uma vez a partir de um arquivo Excel (.xlsx) ou CSV.</div>
+
+    <div style="background:var(--s3);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:11.5px;font-weight:600;color:var(--tx);margin-bottom:8px">📋 Formato esperado da planilha:</div>
+      <table style="width:100%;font-size:11.5px;border-collapse:collapse">
+        <tr style="background:var(--bl);color:#fff">
+          <td style="padding:6px 10px;border-radius:5px 0 0 0;font-weight:600">Descrição</td>
+          <td style="padding:6px 10px;font-weight:600">Unidade</td>
+          <td style="padding:6px 10px;border-radius:0 5px 0 0;font-weight:600">Fabricante (opcional)</td>
+        </tr>
+        <tr style="background:var(--s1)">
+          <td style="padding:6px 10px;border-bottom:1px solid var(--bd)">Eletroduto PVC 3/4" × 3m</td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--bd)">metro</td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--bd);color:var(--t3)">—</td>
+        </tr>
+        <tr style="background:var(--s1)">
+          <td style="padding:6px 10px;border-bottom:1px solid var(--bd)">Eletrocalha 100×50mm perfurada</td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--bd)">barra</td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--bd);color:var(--t3)">—</td>
+        </tr>
+        <tr style="background:var(--s1)">
+          <td style="padding:6px 10px">Abraçadeira metálica 3/4"</td>
+          <td style="padding:6px 10px">peça</td>
+          <td style="padding:6px 10px;color:var(--t3)">—</td>
+        </tr>
+      </table>
+      <div style="margin-top:10px;font-size:11px;color:var(--t3)">
+        💡 A primeira linha deve ser o cabeçalho. Colunas extras são ignoradas.
+      </div>
+    </div>
+
+    <div id="importDropZone" class="import-drop-zone"
+      ondragover="event.preventDefault();this.classList.add('drag')"
+      ondragleave="this.classList.remove('drag')"
+      ondrop="importOnDrop(event)">
+      <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none"
+        onchange="importFileSelected(this.files[0])">
+      <div class="idz-inner" id="idzInner">
+        <div style="font-size:28px;margin-bottom:8px;opacity:.5">📂</div>
+        <div style="font-size:13px;font-weight:600;color:var(--tx);margin-bottom:4px">
+          Arraste o arquivo ou <span class="link-btn" onclick="document.getElementById('importFileInput').click()">clique para selecionar</span>
+        </div>
+        <div style="font-size:11.5px;color:var(--t3)">.xlsx, .xls ou .csv</div>
+      </div>
+    </div>
+
+    <div id="importPreview" style="display:none;margin-top:14px">
+      <div id="importPreviewContent"></div>
+    </div>
+
+    <div id="importStatus" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;font-size:12.5px"></div>
+
+    <div class="modal-footer">
+      <button class="btn ghost" onclick="closeModal('modalImport');resetImport()">Cancelar</button>
+      <button class="btn primary" id="btnImportConfirm" style="display:none" onclick="importConfirm()">
+        ✓ Importar itens
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL API KEY -->
 <div class="overlay" id="apiKeyModal">
@@ -3733,6 +3819,206 @@ function cleanCameraNames(){
     }
     console.log(`[KTS] Limpeza: ${removed} câmera(s) sem prefixo removida(s) do localStorage`);
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// IMPORTAÇÃO EM MASSA (Excel / CSV)
+// ═══════════════════════════════════════════════════════════
+let importParsed = [];
+
+function openImportModal(){
+  document.getElementById('modalImport').classList.add('open');
+  resetImport();
+}
+
+function resetImport(){
+  importParsed = [];
+  document.getElementById('idzInner').innerHTML = `
+    <div style="font-size:28px;margin-bottom:8px;opacity:.5">📂</div>
+    <div style="font-size:13px;font-weight:600;color:var(--tx);margin-bottom:4px">
+      Arraste o arquivo ou <span class="link-btn" onclick="document.getElementById('importFileInput').click()">clique para selecionar</span>
+    </div>
+    <div style="font-size:11.5px;color:var(--t3)">.xlsx, .xls ou .csv</div>`;
+  document.getElementById('importPreview').style.display='none';
+  document.getElementById('importStatus').style.display='none';
+  document.getElementById('btnImportConfirm').style.display='none';
+  document.getElementById('importFileInput').value='';
+}
+
+function importOnDrop(e){
+  e.preventDefault();
+  document.getElementById('importDropZone').classList.remove('drag');
+  const file = e.dataTransfer?.files?.[0];
+  if(file) importFileSelected(file);
+}
+
+function importFileSelected(file){
+  if(!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if(!['xlsx','xls','csv'].includes(ext)){
+    showImportStatus('error','Formato inválido. Use .xlsx, .xls ou .csv');
+    return;
+  }
+  document.getElementById('idzInner').innerHTML = `<div style="font-size:13px;color:var(--t2)">📄 ${file.name}</div>`;
+  if(ext === 'csv') importReadCSV(file);
+  else importReadXLSX(file);
+}
+
+function importReadCSV(file){
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    const rows = text.split(/?
+/).filter(r=>r.trim());
+    const data = rows.map(r=>{
+      // Suporte a ; e ,
+      const sep = r.includes(';') ? ';' : ',';
+      return r.split(sep).map(c=>c.trim().replace(/^"|"$/g,''));
+    });
+    importProcess(data);
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function importReadXLSX(file){
+  // Usar SheetJS via CDN se disponível, senão guiar para CSV
+  if(typeof XLSX === 'undefined'){
+    // Carregar SheetJS dinamicamente
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = () => { importReadXLSXNow(file); };
+    script.onerror = () => {
+      showImportStatus('warn','Sem conexão para carregar leitor de Excel. Salve o arquivo como CSV e tente novamente.');
+    };
+    document.head.appendChild(script);
+  } else {
+    importReadXLSXNow(file);
+  }
+}
+
+function importReadXLSXNow(file){
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      importProcess(data);
+    } catch(err) {
+      showImportStatus('error','Erro ao ler o arquivo: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function importProcess(rows){
+  if(!rows || rows.length < 2){
+    showImportStatus('error','Arquivo vazio ou sem dados além do cabeçalho.');
+    return;
+  }
+
+  // Detectar colunas pelo cabeçalho
+  const header = rows[0].map(c=>(c||'').toString().toLowerCase().trim());
+  const iDesc = header.findIndex(h=>h.includes('descri') || h.includes('nome') || h.includes('item') || h.includes('material'));
+  const iUn   = header.findIndex(h=>h.includes('unid') || h.includes('un.') || h.includes(' un'));
+  const iFab  = header.findIndex(h=>h.includes('fabric') || h.includes('marca'));
+
+  if(iDesc < 0){
+    showImportStatus('error','Coluna "Descrição" não encontrada. Verifique o cabeçalho da planilha.');
+    return;
+  }
+
+  const catId = catState.activeCat;
+  const catKey = CAT_MAP_TO_CATALOG[catId] || catId;
+
+  importParsed = [];
+  const skipped = [];
+
+  rows.slice(1).forEach((row, i) => {
+    const desc = (row[iDesc]||'').toString().trim();
+    if(!desc) return; // linha vazia
+    const un = iUn >= 0 ? (row[iUn]||'').toString().trim() : 'peça';
+    const fab = iFab >= 0 ? (row[iFab]||'').toString().trim() : '';
+    importParsed.push({ desc, un: un||'peça', fab, linha: i+2 });
+  });
+
+  if(!importParsed.length){
+    showImportStatus('error','Nenhum item válido encontrado no arquivo.');
+    return;
+  }
+
+  // Mostrar preview
+  const preview = document.getElementById('importPreview');
+  const content = document.getElementById('importPreviewContent');
+  const maxShow = 8;
+  const shown = importParsed.slice(0, maxShow);
+  const resto = importParsed.length - maxShow;
+
+  content.innerHTML = `
+    <div style="font-size:11.5px;font-weight:600;color:var(--tx);margin-bottom:8px">
+      Preview — ${importParsed.length} item${importParsed.length!==1?'s':''} encontrado${importParsed.length!==1?'s':''}
+    </div>
+    <div style="max-height:200px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px">
+      <table class="import-table">
+        <thead><tr><th>#</th><th>Descrição</th><th>Unidade</th>${iFab>=0?'<th>Fabricante</th>':''}</tr></thead>
+        <tbody>
+          ${shown.map((it,i)=>`<tr>
+            <td style="color:var(--t3);font-family:var(--mono)">${it.linha}</td>
+            <td>${it.desc}</td>
+            <td><span style="background:var(--bls);color:var(--bl);padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600">${it.un}</span></td>
+            ${iFab>=0?`<td style="color:var(--t2)">${it.fab||'—'}</td>`:''}
+          </tr>`).join('')}
+          ${resto>0?`<tr><td colspan="4" style="text-align:center;color:var(--t3);font-style:italic;padding:8px">... e mais ${resto} item${resto!==1?'s':''}</td></tr>`:''}
+        </tbody>
+      </table>
+    </div>`;
+
+  preview.style.display = 'block';
+  document.getElementById('btnImportConfirm').style.display = 'flex';
+  document.getElementById('btnImportConfirm').textContent = `✓ Importar ${importParsed.length} item${importParsed.length!==1?'s':''}`;
+  showImportStatus('ok', `${importParsed.length} item${importParsed.length!==1?'s':''} prontos para importar na categoria <b>${CAT_DEFS.find(c=>c.id===catId)?.label||catId}</b>`);
+}
+
+function importConfirm(){
+  if(!importParsed.length) return;
+  const catId = catState.activeCat;
+  const catKey = CAT_MAP_TO_CATALOG[catId] || catId;
+  const userItems = DB.get('catalog_user') || [];
+  let added = 0;
+
+  importParsed.forEach(it => {
+    const id = catId.toLowerCase() + '-imp-' + uid();
+    const item = {
+      id, cat: catKey, fab: it.fab || '—',
+      nome: it.desc, desc: it.desc,
+      u: 0, w: 0,
+      attrs: { unidade: it.un },
+      user: true
+    };
+    userItems.push(item);
+    if(!CATALOG.find(x=>x.id===id)) CATALOG.push(item);
+    added++;
+  });
+
+  DB.set('catalog_user', userItems);
+  closeModal('modalImport');
+  resetImport();
+  renderCatSidebar();
+  renderItemList();
+  toast(`✓ ${added} item${added!==1?'s':''} importado${added!==1?'s':''} com sucesso`);
+}
+
+function showImportStatus(type, msg){
+  const el = document.getElementById('importStatus');
+  const styles = {
+    ok:   'background:var(--grs);border:1px solid var(--grb);color:#166534',
+    error:'background:var(--rds);border:1px solid var(--rdb);color:var(--rd)',
+    warn: 'background:var(--ams);border:1px solid var(--amb);color:#78350f',
+  };
+  el.style.cssText = styles[type] || styles.ok;
+  el.innerHTML = msg;
+  el.style.display = 'block';
 }
 
 // ==================== PERSISTÊNCIA LOCAL (DB Layer) ====================
