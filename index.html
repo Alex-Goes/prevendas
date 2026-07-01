@@ -3018,7 +3018,10 @@ function renderItemList(){
   const catKey = CAT_MAP_TO_CATALOG[catState.activeCat]||catState.activeCat;
 
   // ── Câmeras: tela de fabricante primeiro ────────────────────────────────
-  if(catState.activeCat === 'CAMERA' && !catState.activeFab && !q){
+  // Categorias que usam o picker de fabricante
+  const FAB_PICKER_CATS = ['CAMERA','NVR','SWITCH','CA_LEITOR','CA_CONTROLADORA',
+    'CA_FECHADURA','ALARME_CENTRAL','ALARME_SENSOR'];
+  if(FAB_PICKER_CATS.includes(catState.activeCat) && !catState.activeFab && !q){
     renderFabPicker();
     return;
   }
@@ -3032,8 +3035,8 @@ function renderItemList(){
                 : (catState.activeCat.startsWith('INFRA_')||catState.activeCat.startsWith('ELET_')) ? x.cat===catState.activeCat
                 : x.cat===catKey;
     if(!match) return false;
-    // Filtrar por fabricante ativo
-    if(catState.activeCat==='CAMERA' && catState.activeFab && x.fab !== catState.activeFab) return false;
+    // Filtrar por fabricante ativo (para categorias com picker)
+    if(FAB_PICKER_CATS.includes(catState.activeCat) && catState.activeFab && x.fab !== catState.activeFab) return false;
     if(q && !(x.nome+x.fab+x.desc).toLowerCase().includes(q)) return false;
     return true;
   });
@@ -3050,8 +3053,8 @@ function renderItemList(){
 
   const gc = 'grid-template-columns: 1fr 100px';
 
-  // ── Câmeras: agrupar por resolução após escolher fabricante ─────────────
-  if(catState.activeCat === 'CAMERA' && catState.activeFab){
+  // ── Categorias com picker: agrupar por tipo/resolução após escolher fabricante ──
+  if(FAB_PICKER_CATS.includes(catState.activeCat) && catState.activeFab){
     const backBtn = `<div style="display:flex;align-items:center;gap:12px;padding:14px 16px 10px;border-bottom:1px solid var(--bd);margin-bottom:8px;position:sticky;top:0;background:var(--s1);z-index:3">
       <button class="btn sm ghost" onclick="catState.activeFab=null;renderItemList()" style="gap:6px">← Fabricantes</button>
       <div style="display:flex;align-items:center;gap:10px;flex:1">
@@ -3060,17 +3063,25 @@ function renderItemList(){
       </div>
     </div>`;
 
-    // Agrupar por resolução MP
+    // Câmeras agrupam por MP, outras por tipo ou sem agrupamento
     const resGroups = {};
     items.forEach(it=>{
-      const mp = it.attrs?.resolucao_mp;
-      const key = mp ? mp + 'MP' : 'Outros';
+      let key;
+      if(catState.activeCat === 'CAMERA'){
+        const mp = it.attrs?.resolucao_mp;
+        key = mp ? mp + 'MP' : 'Outros';
+      } else {
+        // Outras categorias: agrupar por tipo se disponível, senão sem grupo
+        key = it.attrs?.tipo || it.desc?.split(' ')[0] || 'Geral';
+      }
       if(!resGroups[key]) resGroups[key]=[];
       resGroups[key].push(it);
     });
 
     const sortedRes = Object.entries(resGroups).sort(([a],[b])=>{
-      return (parseFloat(a)||999) - (parseFloat(b)||999);
+      // Câmeras: ordem numérica por MP; outros: alfabética
+      const na = parseFloat(a)||0, nb = parseFloat(b)||0;
+      return catState.activeCat==='CAMERA' ? na-nb : a.localeCompare(b);
     });
 
     let html = backBtn;
@@ -3130,10 +3141,12 @@ function renderItemList(){
 
 // Gera chips de atributos principais para exibição na lista
 function renderFabPicker(){
-  const cameras = CATALOG.filter(x=>x.cat==='CAMERA' && !x.auto);
+  // Mapear categoria ativa para o cat do CATALOG
+  const catKey = CAT_MAP_TO_CATALOG[catState.activeCat]||catState.activeCat;
+  const catItems = CATALOG.filter(x=>(x.cat===catKey||x.cat===catState.activeCat) && !x.auto);
   // Contagem por fabricante
   const fabCount = {};
-  cameras.forEach(c=>{ fabCount[c.fab||'—']=(fabCount[c.fab||'—']||0)+1; });
+  catItems.forEach(c=>{ fabCount[c.fab||'—']=(fabCount[c.fab||'—']||0)+1; });
 
   // Cores por fabricante
   const fabColors = {
