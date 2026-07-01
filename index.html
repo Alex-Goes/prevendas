@@ -1522,7 +1522,7 @@ const COMP_RULES = [
 ];
 
 function getCatalog(){
-  const userItems = DB.get('catalog_user') || [];
+  const userItems = getUserCatalog();
   const base = CATALOG.filter(x => !userItems.find(u=>u.id===x.id));
   return [...base, ...userItems];
 }
@@ -3666,20 +3666,15 @@ const CAMERAS_IMPORT = [
 ];
 
 function importCamerasFromPlanilha(){
-  const existing = DB.get('catalog_user') || [];
+  // Câmeras base ficam só em memória (CATALOG) — não vão para o Supabase
   let added = 0;
   CAMERAS_IMPORT.forEach(it => {
-    // Remover versão antiga se existir (pode ter id diferente)
-    if(!existing.find(x=>x.id===it.id)){
-      existing.push(it);
-      if(!CATALOG.find(x=>x.id===it.id)) CATALOG.push(it);
+    if(!CATALOG.find(x=>x.id===it.id)){
+      CATALOG.push(it);
       added++;
     }
   });
-  if(added > 0){
-    DB.set('catalog_user', existing);
-    if(typeof toast==='function') toast('✓ ' + added + ' câmeras importadas!');
-  }
+  if(added > 0) console.log('[KTS] ' + added + ' câmeras base carregadas no catálogo');
 }
 
 
@@ -3798,7 +3793,9 @@ document.addEventListener('click', e=>{
 
 // ── LIMPEZA DE CÂMERAS SEM PREFIXO ──────────────────────────────────────────
 function cleanCameraNames(){
-  const userItems = DB.get('catalog_user') || [];
+  // Com Supabase, limpeza é feita pelo SQL — função desabilitada
+  return;
+  const userItems = [];
   const before = userItems.length;
   // Remover câmeras cujo nome NÃO começa com CÂMERA ou CAMERA (case insensitive)
   const cleaned = userItems.filter(it => {
@@ -3808,7 +3805,7 @@ function cleanCameraNames(){
   });
   const removed = before - cleaned.length;
   if(removed > 0){
-    DB.set('catalog_user', cleaned);
+    // DB.set desabilitado — usando Supabase
     // Remover também do array CATALOG em memória
     for(let i = CATALOG.length - 1; i >= 0; i--){
       const it = CATALOG[i];
@@ -3983,7 +3980,7 @@ function importConfirm(){
   if(!importParsed.length) return;
   const catId = catState.activeCat;
   const catKey = CAT_MAP_TO_CATALOG[catId] || catId;
-  const userItems = DB.get('catalog_user') || [];
+  const userItems = getUserCatalog();
   let added = 0;
 
   importParsed.forEach(it => {
