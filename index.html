@@ -4000,7 +4000,12 @@ function importConfirm(){
     added++;
   });
 
-  DB.set('catalog_user', userItems);
+  // Salvar em massa no Supabase
+  DB.saveCatalogBulk(importParsed.map(it => ({
+    id: catId.toLowerCase() + '-imp-' + uid(),
+    cat: catKey, fab: it.fab||'—', nome: it.desc,
+    desc: it.desc, u:0, w:0, attrs:{unidade:it.un}, user:true
+  }))).then(()=>{ renderCatSidebar(); renderItemList(); });
   closeModal('modalImport');
   resetImport();
   renderCatSidebar();
@@ -4045,7 +4050,8 @@ function loadPersistedState(){
 }
 
 function saveState(){
-  DB.set('projects', state.projects);
+  const ap = proj();
+  if(ap) DB.saveProject(ap);
 }
 
 function saveUserCatalogItem(item){
@@ -4072,570 +4078,57 @@ document.addEventListener('keydown',e=>{
   }
 });
 
-// Carregar estado persistido
-loadPersistedState();
-// Importar câmeras da planilha (adiciona apenas se não existirem)
-importCamerasFromPlanilha();
-// Limpar câmeras sem prefixo CÂMERA/CAMERA do localStorage
-cleanCameraNames();
+// ── BOOT ASYNC — carrega dados do Supabase ──────────────────────────────────
+async function bootApp() {
+  setSaveStatus('⟳ carregando...', 'var(--t3)');
 
-// Demo project se não houver projetos salvos
-if(!state.projects.length){
-  state.projects.push({
-    id:'demo-001', code:'KTS-2025-001',
-    name:'Giardino Golf — CFTV + Acesso',
-    client:'Condomínio Giardino Golf', resp:'Alex',
-    desc:'Sistema integrado de CFTV e controle de acesso.',
-    status:'andamento', modules:{},
-    rack:{racks:[{model:'12U',slots:Array(12).fill(null)}],activeIdx:0,fieldEquip:{}},
-    created: Date.now()-7*86400000
+  // Carregar projetos do Supabase
+  const projsSupa = await DB.getProjects();
+  if(projsSupa.length) {
+    state.projects = projsSupa.map(p => ({
+      id: p.id, code: p.code, name: p.name, client: p.client,
+      resp: p.resp, desc: p.description, status: p.status,
+      modules: p.modules||{},
+      rack: p.rack||{racks:[{model:'12U',slots:Array(12).fill(null)}],activeIdx:0,fieldEquip:{}},
+      created: new Date(p.created_at).getTime()
+    }));
+  }
+
+  // Carregar catálogo do usuário do Supabase
+  const catSupa = await DB.getCatalogUser();
+  catSupa.forEach(it => {
+    if(!CATALOG.find(x=>x.id===it.id)) CATALOG.push(it);
   });
-  saveState();
-}
 
+  // Importar câmeras base da planilha
+  importCamerasFromPlanilha();
 
-// ═══════════════════════════════════════════════════════════
-// WIZARD CONTROLE DE ACESSO
-// ═══════════════════════════════════════════════════════════
-const CA_STEPS = ['Pontos de Acesso','Equipamentos','Revisão'];
-let wizCA = {};
+  setSaveStatus('', 'var(--t3)');
 
-function initWizCA(){
-  const p = proj();
-  const saved = p?.modules?.ca;
-  wizCA = saved?.done ? {...saved, step:2} : {step:0, portas:[], tipo_ctrl:'standalone'};
-  showView('ca');
-  renderWizCA();
-}
-
-function renderWizCA(){
-  const el = document.getElementById('wizCA');
-  if(!el) return;
-  const s = wizCA.step;
-  const steps = CA_STEPS.map((l,i)=>`<div class="wstep ${i<s?'done':i===s?'active':''}"><div class="ws-dot">${i<s?'✓':i+1}</div><div class="ws-label">${l}</div></div>`).join('');
-  let body='', tip='';
-
-  if(s===0){
-    const portasHtml=(wizCA.portas||[]).map((porta,i)=>`
-      <div class="porta-item">
-        <div class="pi-head">
-          <div class="porta-num">${i+1}</div>
-          <input value="${porta.nome||'Porta '+(i+1)}" placeholder="Ex: Entrada principal"
-            oninput="wizCA.portas[${i}].nome=this.value"
-            style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--bd);outline:none;font-size:13px;font-weight:600;font-family:var(--sans);padding:2px 6px">
-          <button class="btn xs ghost" style="color:var(--rd)" onclick="wizCA.portas.splice(${i},1);renderWizCA()">✕</button>
-        </div>
-        <div class="pi-body">
-          <div class="pi-field"><label>Tecnologia do leitor</label>
-            <select onchange="wizCA.portas[${i}].tecnologia=this.value">
-              ${['proximidade 125kHz','mifare 13.56MHz','biometria digital','facial / QR Code','senha numérica','cartão + senha'].map(t=>`<option value="${t}" ${porta.tecnologia===t?'selected':''}>${t}</option>`).join('')}
-            </select>
-          </div>
-          <div class="pi-field"><label>Tipo de trava</label>
-            <select onchange="wizCA.portas[${i}].trava=this.value">
-              ${['eletroímã 280kg','eletroímã 180kg','fecho FA (fail-safe)','fecho FN (fail-secure)','fechadura elétrica','motor lock'].map(t=>`<option value="${t}" ${porta.trava===t?'selected':''}>${t}</option>`).join('')}
-            </select>
-          </div>
-          <div class="pi-field"><label>Ambiente</label>
-            <select onchange="wizCA.portas[${i}].ambiente=this.value">
-              ${['interno','externo coberto','externo descoberto','área molhada'].map(t=>`<option value="${t}" ${porta.ambiente===t?'selected':''}>${t}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-      </div>`).join('');
-    body=`<h3>🚪 Pontos de Acesso</h3>
-      <div class="wdesc">Cadastre cada porta individualmente. Defina tecnologia do leitor, tipo de trava e ambiente.</div>
-      <div id="portaList">${portasHtml||'<div style="padding:20px;text-align:center;color:var(--t3);font-size:12.5px;border:1.5px dashed var(--bd2);border-radius:9px">Nenhuma porta adicionada. Clique em "+ Adicionar" abaixo.</div>'}</div>
-      <button class="btn" style="width:100%;justify-content:center;border:1.5px dashed var(--bd2);margin-top:4px" onclick="caAddPorta()">+ Adicionar ponto de acesso</button>`;
-    tip=`${wizCA.portas?.length||0} porta${(wizCA.portas?.length||0)!==1?'s':''} configurada${(wizCA.portas?.length||0)!==1?'s':''}`;
-  }
-  else if(s===1){
-    body=`<h3>⚙ Equipamentos</h3>
-      <div class="wdesc">Defina a arquitetura de controladoras.</div>
-      <div style="margin-bottom:18px"><label style="font-size:11.5px;font-weight:600;color:var(--t2);display:block;margin-bottom:8px">Tipo de controladora</label>
-      <div class="opt-grid c2">
-        ${[['standalone','Standalone por porta','Uma controladora por ponto — plug & play, sem servidor'],['centralizado','Centralizado','Controladora multi-porta — escalável, gestão via software']].map(([v,nm,ds])=>`
-        <div class="opt-card ${wizCA.tipo_ctrl===v?'sel':''}" onclick="wizCA.tipo_ctrl='${v}';renderWizCA()">
-          <div><div class="oc-name">${nm}</div><div class="oc-desc">${ds}</div></div>
-        </div>`).join('')}
-      </div></div>
-      <div style="background:var(--bls);border:1px solid var(--blb);border-radius:9px;padding:14px 16px">
-        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--bl);text-transform:uppercase;margin-bottom:10px">Dimensionamento calculado</div>
-        ${caGetEquipList().map(e=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;border-bottom:1px solid var(--blb)"><span>${e.nome}</span><span style="font-family:var(--mono);font-weight:600;color:var(--bl)">${e.qtd} ${e.unit||'un'}</span></div>`).join('')}
-      </div>`;
-    tip='Revise o dimensionamento antes de confirmar';
-  }
-  else if(s===2){
-    const equip=caGetEquipList();
-    body=`<h3>✅ Revisão — Controle de Acesso</h3>
-      <div class="wdesc">Confirme antes de salvar no projeto.</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-        <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px">
-          <div style="font-size:10px;font-weight:600;letter-spacing:1px;color:var(--t3);text-transform:uppercase;margin-bottom:10px">Portas (${wizCA.portas?.length||0})</div>
-          ${(wizCA.portas||[]).map((p,i)=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bd);font-size:12px"><span><b>${i+1}.</b> ${p.nome||'Porta '+(i+1)}</span><span style="color:var(--t2);font-family:var(--mono);font-size:10px">${p.tecnologia||'—'}</span></div>`).join('')||'—'}
-        </div>
-        <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px">
-          <div style="font-size:10px;font-weight:600;letter-spacing:1px;color:var(--t3);text-transform:uppercase;margin-bottom:10px">Materiais gerados</div>
-          ${equip.map(e=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bd);font-size:12px"><span>${e.nome}</span><span style="font-family:var(--mono);font-weight:600;color:var(--bl)">${e.qtd} ${e.unit||'un'}</span></div>`).join('')}
-        </div>
-      </div>`;
-    tip='Ao confirmar, materiais de CA serão adicionados à BOM do projeto.';
-  }
-
-  el.innerHTML=`
-    <div class="wiz-steps">${steps}</div>
-    <div class="wiz-body">${body}</div>
-    <div class="wiz-footer">
-      <div class="wf-tip">${tip}</div>
-      <div style="display:flex;gap:8px">
-        ${s>0?`<button class="btn ghost" onclick="caNav(-1)">← Voltar</button>`:''}
-        ${s<CA_STEPS.length-1?`<button class="btn primary" onclick="caNav(1)">Próximo →</button>`:`<button class="btn success" onclick="finalizarCA()">Salvar e gerar BOM ✓</button>`}
-      </div>
-    </div>`;
-}
-
-function caAddPorta(){
-  wizCA.portas=wizCA.portas||[];
-  wizCA.portas.push({nome:`Porta ${wizCA.portas.length+1}`,tecnologia:'proximidade 125kHz',trava:'eletroímã 280kg',ambiente:'interno'});
-  renderWizCA();
-}
-
-function caNav(d){
-  if(d>0&&wizCA.step===0&&!wizCA.portas?.length){toast('⚠ Adicione ao menos uma porta');return;}
-  wizCA.step=Math.max(0,Math.min(CA_STEPS.length-1,wizCA.step+d));
-  renderWizCA();
-}
-
-function caGetEquipList(){
-  const portas=wizCA.portas||[];
-  const n=portas.length;
-  if(!n) return [];
-  const list=[];
-  // Leitores agrupados por tecnologia
-  const tecCount={};
-  portas.forEach(p=>{ tecCount[p.tecnologia]=(tecCount[p.tecnologia]||0)+1; });
-  const tecNomes={'proximidade 125kHz':'Leitor Prox 125kHz (Wiegand)','mifare 13.56MHz':'Leitor Mifare 13.56MHz','biometria digital':'Leitor Biométrico digital','facial / QR Code':'Leitor Facial / QR Code','senha numérica':'Teclado numérico','cartão + senha':'Leitor cartão + teclado'};
-  Object.entries(tecCount).forEach(([tec,qtd])=>list.push({nome:tecNomes[tec]||tec,qtd,cat:'leitor'}));
-  // Travas agrupadas
-  const travaCount={};
-  portas.forEach(p=>{ travaCount[p.trava]=(travaCount[p.trava]||0)+1; });
-  Object.entries(travaCount).forEach(([trava,qtd])=>list.push({nome:trava.charAt(0).toUpperCase()+trava.slice(1),qtd,cat:'trava'}));
-  // Controladoras
-  if(wizCA.tipo_ctrl==='standalone'){
-    list.push({nome:'Controladora standalone (1 porta)',qtd:n,cat:'ctrl'});
-  } else {
-    const n4=Math.floor(n/4), resto=n%4;
-    if(n4>0) list.push({nome:'Controladora 4 portas (CCA 4010)',qtd:n4,cat:'ctrl'});
-    if(resto>0) list.push({nome:`Controladora ${resto<=2?'2':'4'} portas`,qtd:1,cat:'ctrl'});
-  }
-  // Fontes 12V — 1 a cada 4 portas
-  list.push({nome:'Fonte chaveada 12V 5A',qtd:Math.ceil(n/4),cat:'fonte'});
-  // Cabo alarme
-  list.push({nome:'Cabo alarme 2×0,5mm',qtd:Math.ceil(n*25/100),cat:'cabo',unit:'rolo 100m'});
-  return list;
-}
-
-function finalizarCA(){
-  const p=proj(); if(!p) return;
-  p.modules=p.modules||{};
-  p.modules.ca={done:true,...wizCA,equipList:caGetEquipList()};
-  saveState();
-  toast('✓ Controle de Acesso salvo');
-  openBOMView();
-}
-
-// ═══════════════════════════════════════════════════════════
-// BOM CONSOLIDADA
-// ═══════════════════════════════════════════════════════════
-function buildBOM(p){
-  const groups=[];
-  const cftv=p?.modules?.cftv;
-  const ca=p?.modules?.ca;
-
-  // CFTV — Suportes + Materiais de fixação (EMSV)
-  if(cftv?.done && cftv.suportes && Object.values(cftv.suportes).some(v=>v>0)){
-    const SUPORTE_NOMES = {
-      'sup-teto-fisheye-1m':  'Suporte de teto Fish Eye 1 m Branco',
-      'sup-teto-fisheye-13m': 'Suporte de teto Fish Eye 1,3 m Branco',
-      'sup-teto-fisheye-2m':  'Suporte de teto Fish Eye 2 m Branco',
-      'sup-teto-fisheye-3m':  'Suporte de teto Fish Eye 3 m Branco',
-      'sup-teto-fisheye-5m':  'Suporte de teto Fish Eye 5 m Branco',
-      'sup-teto-fisheye-6m':  'Suporte de teto Fish Eye 6 m Branco',
-    };
-
-    // Itens dos suportes selecionados
-    const supItems = Object.entries(cftv.suportes)
-      .filter(([,v])=>v>0)
-      .map(([id,qtd])=>({
-        nome: SUPORTE_NOMES[id]||id, desc:'Suporte de instalação',
-        qtd, src:'CFTV', cat_bom:'Suportes', unit:'peça'
-      }));
-
-    // Total de suportes (soma de todos os modelos)
-    const totalSup = Object.values(cftv.suportes).reduce((s,v)=>s+v,0);
-
-    // Materiais de fixação por suporte (composição EMSV-XXXX)
-    // Fonte: EMSV-XXXX_202X-REV00 — 1 suporte requer:
-    //   1× Barra roscada zincada 3/8 × 3000mm
-    //   8× Porca auto travante Parlock 3/8
-    //  16× Porca sextavada 3/8
-    //  16× Arruela lisa 3/8
-    const matFixacao = [
-      { nome:'Barra roscada zincada 3/8 × 3000mm', desc:'Por suporte de teto — ref. EMSV', qtd: totalSup * 1,  unit:'peça', fator:'1 × N', src:'⚡ auto' },
-      { nome:'Porca auto travante Parlock 3/8',     desc:'Por suporte de teto — ref. EMSV', qtd: totalSup * 8,  unit:'peça', fator:'8 × N', src:'⚡ auto' },
-      { nome:'Porca sextavada 3/8',                 desc:'Por suporte de teto — ref. EMSV', qtd: totalSup * 16, unit:'peça', fator:'16 × N', src:'⚡ auto' },
-      { nome:'Arruela lisa 3/8',                    desc:'Por suporte de teto — ref. EMSV', qtd: totalSup * 16, unit:'peça', fator:'16 × N', src:'⚡ auto' },
-    ];
-
-    if(supItems.length){
-      groups.push({titulo:'🔩 CFTV — Suportes de teto',items:supItems});
-      groups.push({titulo:'🔩 CFTV — Fixação de suportes ⚡',items:matFixacao,
-        nota:`Calculado automaticamente: ${totalSup} suporte${totalSup!==1?'s':''} × composição EMSV`});
-    }
-  }
-
-  // CFTV — Caixas de passagem
-  if(cftv?.done && cftv.caixas && Object.values(cftv.caixas).some(v=>v>0)){
-    const catalog = typeof getCatalog==='function'?getCatalog():CATALOG;
-    const cxItems = Object.entries(cftv.caixas)
-      .filter(([,v])=>v>0)
-      .map(([id,qtd])=>{
-        const it = catalog.find(x=>x.id===id);
-        return {nome:it?.nome||it?.desc||id, desc:'Caixa de passagem', qtd,
-                src:'CFTV', cat_bom:'Caixas de Passagem', unit:it?.attrs?.unidade||'peça'};
-      });
-    if(cxItems.length) groups.push({titulo:'📦 CFTV — Caixas de Passagem',items:cxItems});
-  }
-
-  // CFTV — câmeras
-  if(cftv?.done && cftv.linhas?.length){
-    const camItems=cftv.linhas.map(l=>{
-      const it=getItem(l.camId);
-      return {nome:`${it?.fab||''} ${it?.nome||l.camId}`,desc:it?.desc||'',qtd:l.qtd,src:'CFTV',cat_bom:'Câmeras IP'};
+  // Demo project se não houver projetos salvos
+  if(!state.projects.length){
+    state.projects.push({
+      id: 'demo-001',
+      code: 'KTS-2025-001',
+      name: 'Projeto Demonstração',
+      client: 'Cliente Exemplo',
+      resp: 'Alex',
+      desc: 'Projeto de demonstração do sistema.',
+      status: 'rascunho',
+      modules: {},
+      rack: {racks:[{model:'12U',slots:Array(12).fill(null)}],activeIdx:0,fieldEquip:{}},
+      created: Date.now()
     });
-    groups.push({titulo:'📷 CFTV — Câmeras',items:camItems});
-    // Gravação e rede
-    const st=parseFloat(cftv.storage)||0;
-    const hds=cftv.hds||Math.ceil(st/8);
-    const sw=cftv.switches||Math.ceil((wizTotalCams(cftv)||1)*1.2/24);
-    const cabo=cftv.cabo||0;
-    groups.push({titulo:'📷 CFTV — Gravação e Rede',items:[
-      {nome:'HD Vigilância 8TB (Purple / SkyHawk)',desc:`${hds} HDs para ${st.toFixed(1)} TB · ${cftv.dias_retencao}d ${cftv.modo_gravacao}`,qtd:hds,src:'calculado',cat_bom:'Storage'},
-      {nome:'Switch PoE 24 portas',desc:`${sw} un · 20% folga sobre câmeras`,qtd:sw,src:'calculado',cat_bom:'Rede'},
-      ...(cabo>0?[{nome:'Cabo UTP Cat5e/Cat6',desc:`${cftv.distancia_media||50}m média · fator 1.15`,qtd:cabo,src:'calculado',cat_bom:'Cabeamento',unit:'m'}]:[]),
-    ]});
+    DB.saveProject(state.projects[0]);
   }
 
-  // Controle de Acesso
-  if(ca?.done && ca.equipList?.length){
-    groups.push({titulo:'🚪 Controle de Acesso',items:ca.equipList.map(e=>({
-      nome:e.nome,desc:e.cat||'',qtd:e.qtd,src:'CA',cat_bom:'Controle de Acesso',unit:e.unit
-    }))});
-  }
-
-  // Rack equipamentos
-  const rack=proj()?.rack||state?.rack;
-  if(rack?.racks){
-    const rackEquip={};
-    rack.racks.forEach(r=>(r.slots||[]).forEach(s=>{ if(s&&!s.cont) rackEquip[s.itemId]=(rackEquip[s.itemId]||0)+1; }));
-    const rackItems=Object.entries(rackEquip).map(([id,qtd])=>{
-      const it=getItem(id);
-      return {nome:`${it?.fab&&it.fab!=='—'?it.fab+' ':''}${it?.nome||id}`,desc:`${it?.desc||''} · ${it?.u||0}U`,qtd,src:'Rack',cat_bom:'Infraestrutura de Rack'};
-    });
-    if(rackItems.length) groups.push({titulo:'🗄 Rack — Equipamentos',items:rackItems});
-
-    // Acessórios de rack calculados
-    const acc=calcRackAcc(rack.racks);
-    if(acc.length) groups.push({titulo:'🗄 Rack — Acessórios',items:acc.map(a=>({nome:a.nome,desc:a.obs,qtd:a.qtd,src:'calculado',cat_bom:'Acessórios de Rack'}))});
-  }
-
-  // Acessórios automáticos (composição)
-  const fe={...rack?.fieldEquip||{}};
-  const comps=evalComposition(fe);
-  const compItems=Object.entries(comps).map(([id,c])=>{
-    const it=getItem(id);
-    return {nome:it?.nome||id,desc:c.obs,qtd:c.qtd,src:'⚡ auto',cat_bom:'Acessórios'};
-  });
-  if(compItems.length) groups.push({titulo:'⚡ Acessórios Automáticos',items:compItems});
-
-  return groups;
+  showView('projects');
+  updateApiKeyStatus?.();
+  updateSidebar?.();
+  renderProjects();
 }
 
-function wizTotalCams(cftv){
-  const src = cftv || wiz;
-  return (src?.linhas||[]).reduce((s,l)=>s+l.qtd,0);
-}
-
-function openBOMView(){
-  const p=proj(); if(!p){ toast('Nenhum projeto selecionado'); return; }
-  showView('bom');
-  renderBOMPage(p);
-  updateSidebar();
-}
-
-function renderBOMPage(p){
-  const el=document.getElementById('pgBOM'); if(!el) return;
-  const groups=buildBOM(p);
-  const totalItens=groups.reduce((s,g)=>s+g.items.length,0);
-  const cftv=p.modules?.cftv;
-  const ca=p.modules?.ca;
-
-  const kpis=[
-    {v:cftv?.total_cameras||cftv?.linhas?.reduce((s,l)=>s+l.qtd,0)||'—',l:'Câmeras IP',hl:!!cftv?.done},
-    {v:ca?.portas?.length||'—',l:'Portas CA',hl:!!ca?.done},
-    {v:cftv?.storage?parseFloat(cftv.storage).toFixed(1)+' TB':'—',l:'Storage CFTV'},
-    {v:cftv?.hds||'—',l:'HDs 8TB'},
-    {v:cftv?.switches||'—',l:'Switches PoE'},
-    {v:cftv?.cabo?cftv.cabo+'m':'—',l:'Cabo UTP'},
-    {v:totalItens||'—',l:'Tipos na BOM'},
-  ].map(k=>`<div class="kpi ${k.hl?'hl':''}">
-    <div class="kv">${k.v} <span></span></div>
-    <div class="kl">${k.l}</div>
-  </div>`).join('');
-
-  const tableRows=groups.map(g=>`
-    <tr class="bom-grp"><td colspan="5">${g.titulo}</td></tr>
-    ${g.items.filter(i=>i.qtd>0).map(i=>`<tr>
-      <td style="font-weight:500">${i.nome}</td>
-      <td style="font-size:11px;color:var(--t3)">${i.desc||''}</td>
-      <td style="font-family:var(--mono);font-weight:700;color:var(--bl);text-align:right;font-size:13px">${i.qtd}</td>
-      <td style="font-size:11px;color:var(--t2)">${i.unit||'un'}</td>
-      <td style="${i.src?.includes('auto')||i.src?.includes('⚡')?'font-size:10px;color:var(--gr);font-family:var(--mono)':'font-size:10px;color:var(--t3);font-family:var(--mono)'}">${i.src}</td>
-    </tr>`).join('')}`).join('');
-
-  const semModulos = !cftv?.done && !ca?.done;
-
-  el.innerHTML=`
-    <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px">
-      <div>
-        <div style="font-size:22px;font-weight:700;letter-spacing:-.5px">Lista de Materiais</div>
-        <div style="font-size:13px;color:var(--t2);margin-top:4px">${p.name} · ${fmtDate(Date.now())}</div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn success" onclick="exportBOMCSV()">↓ Exportar CSV</button>
-        ${!cftv?.done?`<button class="btn" onclick="openModule('cftv')">📷 Configurar CFTV</button>`:''}
-        ${!ca?.done?`<button class="btn" onclick="openModule('ca')">🚪 Configurar CA</button>`:''}
-      </div>
-    </div>
-    ${semModulos?`<div style="background:var(--ams);border:1px solid var(--amb);border-radius:9px;padding:14px 16px;margin-bottom:20px;font-size:12.5px;color:#78350f">
-      ⚠ Nenhum módulo configurado ainda. Configure CFTV e/ou Controle de Acesso para gerar a lista.
-    </div>`:''}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;margin-bottom:24px">${kpis}</div>
-    ${tableRows?`
-    <div style="font-size:10px;font-weight:700;letter-spacing:1.2px;color:var(--t3);text-transform:uppercase;display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      Itens completos <span style="flex:1;height:1px;background:var(--bd);display:block"></span>
-    </div>
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-      <thead><tr>
-        <th style="text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--t3);text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--bd)">Item</th>
-        <th style="text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--t3);text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--bd)">Descrição</th>
-        <th style="text-align:right;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--t3);text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--bd)">Qtd</th>
-        <th style="text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--t3);text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--bd)">Un.</th>
-        <th style="text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--t3);text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--bd)">Origem</th>
-      </tr></thead>
-      <tbody>${tableRows}</tbody>
-    </table>`:''}`;
-}
-
-function exportBOMCSV(){
-  const p=proj(); if(!p) return;
-  const groups=buildBOM(p);
-  let csv=`\uFEFFPROJETO;${p.name}\nCÓDIGO;${p.code||''}\nDATA;${fmtDate(Date.now())}\n\nCATEGORIA;ITEM;DESCRIÇÃO;QTD;UNIDADE;ORIGEM\n`;
-  groups.forEach(g=>{
-    g.items.filter(i=>i.qtd>0).forEach(i=>{
-      csv+=`${i.cat_bom||g.titulo.replace(/[📷🚪🗄⚡]/g,'').trim()};${i.nome};${i.desc||''};${i.qtd};${i.unit||'un'};${i.src}\n`;
-    });
-  });
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`BOM_${p.code||p.name}_${Date.now()}.csv`;
-  a.click();
-  toast('✓ BOM exportada como CSV');
-}
-
-// Corrigir openModule para incluir CA e BOM
-// openModule unificada — CA, BOM, CFTV e Rack tratados na função original
-
-// ═══════════════════════════════════════════════════════════
-// EXTRAÇÃO DE DATASHEET POR REGEX (offline, gratuito)
-// ═══════════════════════════════════════════════════════════
-function dsOnPaste(el){
-  const txt = el.value;
-  const count = document.getElementById('dsPasteCount');
-  const btn = document.getElementById('dsBtnExtract');
-  if(count) count.textContent = txt.length > 0 ? txt.length + ' chars' : '';
-  if(btn) btn.disabled = txt.trim().length < 20;
-}
-
-function dsExtractFromText(){
-  const txt = (document.getElementById('dsPasteArea')?.value || '').trim();
-  if(!txt){ toast('⚠ Cole o texto do datasheet primeiro'); return; }
-  const cs = catState || APP?.catState;
-  const d = cs?.formData || {};
-  const catId = cs?.activeCat || 'CAMERA';
-  let preenchidos = 0;
-
-  function setField(key, val){
-    if(val == null || val === '') return;
-    if(cs) { if(cs.formData) cs.formData[key] = val; else cs[key] = val; }
-    else if(catState) catState.formData[key] = val;
-    preenchidos++;
-  }
-
-  function num(regex){ const m = txt.match(regex); return m ? parseFloat(m[1].replace(',','.')) : null; }
-  function str(regex){ const m = txt.match(regex); return m ? m[1].trim() : null; }
-  function has(regex){ return regex.test(txt); }
-
-  // ── Fabricante
-  if(has(/intelbras/i)) setField('fab','INTELBRAS');
-  else if(has(/hikvision/i)) setField('fab','HIKVISION');
-  else if(has(/axis/i)) setField('fab','AXIS');
-  else if(has(/dahua/i)) setField('fab','DAHUA');
-  else if(has(/bosch/i)) setField('fab','BOSCH');
-  else { const m=txt.match(/^([A-Z][A-Za-z\s]+?)\s*(?:Co\.|Ltd|Inc|S\.A|LTDA)/m); if(m) setField('fab',m[1].trim()); }
-
-  // ── Modelo — pegar primeira linha ou referência de modelo
-  const modeloPatterns = [
-    /(?:Modelo|Model|Part No\.?|Item No\.?|Ref\.?)[:\s]+([A-Z0-9][\w\-\.\/]+)/i,
-    /^([A-Z]{2,}[\-\s][A-Z0-9][\w\-\.\/]+)/m,
-    /([A-Z]{2,4}[\-][0-9A-Z]{4,})/,
-  ];
-  for(const p of modeloPatterns){ const m=txt.match(p); if(m&&m[1].length>2&&m[1].length<40){ setField('nome',m[1].trim()); break; } }
-
-  if(catId==='CAMERA'){
-    // Resolução
-    const res = num(/(\d+(?:[,\.]\d+)?)\s*(?:megapixel|MP|Mpx|mega pixel)/i)
-             || num(/(\d+)\s*MP/i)
-             || (()=>{ const m=txt.match(/(\d{3,5})\s*[×xX]\s*(\d{3,5})/); return m?Math.round(parseInt(m[1])*parseInt(m[2])/1e6*10)/10:null; })();
-    if(res) setField('resolucao_mp', parseFloat(res.toFixed(1)));
-
-    // IR
-    const ir = num(/IR\s*(?:Range|distance|alcance)?[:\s]+(\d+)\s*m/i)
-             || num(/(\d+)\s*m\s*(?:IR|infrared)/i)
-             || num(/Infrared\s*(?:Range|distance)[:\s]+(\d+)\s*m/i);
-    if(ir) setField('ir', ir);
-
-    // Consumo
-    const w = num(/(?:Max\.?\s*)?Power\s*Consumption[:\s]+(\d+(?:[,\.]\d+)?)\s*W/i)
-            || num(/Consumo[:\s]+(\d+(?:[,\.]\d+)?)\s*W/i)
-            || num(/(\d+(?:[,\.]\d+)?)\s*W\s*(?:\(max\))?$/im);
-    if(w) setField('consumo_w', w);
-
-    // Bitrate
-    const br = num(/(?:Max\.?\s*)?(?:Bit\s*Rate|Bitrate)[:\s]+(\d+(?:[,\.]\d+)?)\s*Mbps/i)
-             || num(/(\d+(?:[,\.]\d+)?)\s*Mbps/i);
-    if(br) setField('bitrate_mbps', br);
-
-    // IP
-    const ip = num(/IP\s*6(\d)/i);
-    if(ip) setField('ip', parseFloat('6'+ip));
-    else if(has(/IP67/i)) setField('ip',67);
-    else if(has(/IP66/i)) setField('ip',66);
-    else if(has(/IP65/i)) setField('ip',65);
-
-    // PoE
-    if(has(/PoE\+\+|802\.3bt/i)) setField('classe_poe','bt');
-    else if(has(/PoE\+|802\.3at/i)) setField('classe_poe','at');
-    else if(has(/PoE|802\.3af/i)) setField('classe_poe','af');
-
-    // Booleans
-    if(has(/ONVIF/i)) setField('onvif',true);
-    if(has(/WDR|Wide\s*Dynamic/i)) setField('wdr',true);
-    if(has(/(?:built.in\s*)?mic|microphone|áudio|audio/i)) setField('audio',true);
-
-    // Tipo
-    if(has(/bullet/i)) setField('tipo','bullet');
-    else if(has(/dome|domo/i)) setField('tipo','dome');
-    else if(has(/ptz|pan.tilt/i)) setField('tipo','ptz');
-    else if(has(/fisheye|olho.de.peixe/i)) setField('tipo','fisheye');
-
-    // SD Card
-    if(has(/micro.?sd|sd.?card|slot.?sd|cartão.?sd/i)) setField('sd_card',true);
-    const sdCap = num(/(\d+)\s*GB\s*(?:micro.?sd|sd)/i) || num(/(?:micro.?sd|sd.?card)[^0-9]*(\d+)\s*GB/i);
-    if(sdCap) setField('sd_cap_gb', sdCap);
-
-    // Analíticos / IA
-    if(has(/analitico|analytic|deep.?learning|inteligencia.?artificial|ia|ai|smart/i)) setField('analitico',true);
-    if(has(/reconhec.*placa|lpr|alpr|plate.recog/i)) setField('analiticos',['reconhecimento de placa (LPR)']);
-    else if(has(/reconhec.*facial|face.recog/i)) setField('analiticos',['reconhecimento facial']);
-    else if(has(/contagem.?(de\s*)?pessoa|people.count/i)) setField('analiticos',['contagem de pessoas']);
-    else if(has(/detec.*veículo|vehicle.detect/i)) setField('analiticos',['detecção de veículo']);
-    else if(has(/detec.*pessoa|person.detect/i)) setField('analiticos',['detecção de pessoa']);
-    else if(has(/linha.virtual|virtual.line|tripwire/i)) setField('analiticos',['linha virtual']);
-    else if(has(/zona.virtual|zone|area.intrusion/i)) setField('analiticos',['zona virtual']);
-    else if(has(/analitico|analytic/i)) setField('analiticos',['múltiplos analíticos']);
-  }
-
-  else if(catId==='SWITCH'){
-    const portas = num(/(\d+)\s*(?:PoE\s*)?(?:port|porta)/i);
-    if(portas) setField('portas_total', portas);
-    const poePorH = num(/(\d+)\s*PoE\s*port/i);
-    if(poePorH) setField('portas_poe', poePorH);
-    const budget = num(/PoE\s*budget[:\s]+(\d+)\s*W/i)
-                || num(/(\d+)\s*W\s*PoE\s*budget/i)
-                || num(/total\s*(?:PoE\s*)?power[:\s]+(\d+)\s*W/i);
-    if(budget) setField('poe_budget_w', budget);
-    if(has(/Giga|1000\s*Mbps|1\s*Gbps/i)) setField('uplink_mbps',1000);
-    else if(has(/100\s*Mbps/i)) setField('uplink_mbps',100);
-    if(has(/PoE/i)) setField('tem_poe',true);
-    if(has(/gerenci|manag/i)) setField('gerenciavel',true);
-  }
-
-  else if(catId==='NVR'){
-    const canais = num(/(\d+)\s*(?:canal|channel|ch)/i);
-    if(canais) setField('canais', canais);
-    const hds = num(/(\d+)\s*(?:HD|HDD|disco)/i);
-    if(hds) setField('max_hds', hds);
-    if(has(/PoE/i)) setField('poe_integrado',true);
-  }
-
-  else if(catId==='CA'){
-    if(has(/125\s*kHz|125kHz/i)) setField('tecnologia','proximidade 125kHz');
-    else if(has(/13\.56\s*MHz|Mifare|MIFARE/i)) setField('tecnologia','mifare 13.56MHz');
-    else if(has(/biometric|biometri|digital\s*fingerprint/i)) setField('tecnologia','biometria digital');
-    else if(has(/facial|face\s*recog/i)) setField('tecnologia','facial / QR Code');
-    if(has(/Wiegand/i)) setField('wiegand',true);
-    if(has(/RS.?485/i)) setField('rs485',true);
-    if(has(/IP65|IP66|IP67/i)) setField('ip65',true);
-    const v = num(/(?:supply|input|tensão|voltage)[:\s]+(\d+)\s*V/i)
-            || num(/(\d+)\s*VDC/i);
-    if(v) setField('tensao_v',v);
-    const ma = num(/(\d+)\s*mA/i);
-    if(ma) setField('corrente_ma',ma);
-  }
-
-  // Altura no rack — quase sempre 1U para equipamentos ativos
-  if(['SWITCH','NVR','GRAVADOR'].includes(catId)){
-    if(has(/1\s*U|1U/i)) setField('altura_u',1);
-    else if(has(/2\s*U|2U/i)) setField('altura_u',2);
-    else setField('altura_u',1);
-  }
-
-  // Re-renderizar formulário com campos preenchidos
-  renderItemForm?.();
-  renderIFP?.();
-
-  // Mostrar resultado
-  const statusEl = document.getElementById('dsStatus');
-  if(statusEl){
-    statusEl.style.display='block';
-    statusEl.style.background = preenchidos>=4 ? 'var(--grs)' : 'var(--ams)';
-    statusEl.style.border = '1px solid ' + (preenchidos>=4 ? 'var(--grb)' : 'var(--amb)');
-    statusEl.style.color = preenchidos>=4 ? '#166534' : '#78350f';
-    statusEl.textContent = preenchidos>0
-      ? '✓ ' + preenchidos + ' campo' + (preenchidos!==1?'s':'') + ' preenchido' + (preenchidos!==1?'s':'') + ' — revise e salve'
-      : '⚠ Nenhum campo identificado — verifique se colou o texto correto';
-  }
-  if(preenchidos===0) toast('⚠ Nenhum campo identificado');
-  else toast('✓ ' + preenchidos + ' campos extraídos');
-}
-
-
-showView('projects');
-updateApiKeyStatus?.();
-updateSidebar?.();
-renderProjects();
+bootApp();
 </script>
 </body>
 </html>
