@@ -1357,7 +1357,7 @@ body{background:var(--bg)}
       <textarea id="f-desc" placeholder="Condomínio, endereço, escopo resumido..."></textarea>
     </div>
     <div class="modal-footer">
-      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn ghost" onclick="closeModal('modalOverlay')">Cancelar</button>
       <button class="btn primary" onclick="createProject()">Criar Projeto →</button>
     </div>
   </div>
@@ -1736,7 +1736,14 @@ function openNewProject(){
   document.getElementById('modalOverlay').classList.add('open');
   setTimeout(()=>document.getElementById('f-name').focus(), 100);
 }
-function closeModal(){ document.getElementById('modalOverlay').classList.remove('open') }
+function closeModal(id){
+  if(id){
+    document.getElementById(id)?.classList.remove('open');
+  } else {
+    // Fechar todos os modais abertos
+    document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));
+  }
+}
 function createProject(){
   const name = document.getElementById('f-name').value.trim();
   if(!name){ toast('Nome do projeto é obrigatório'); return }
@@ -1756,6 +1763,7 @@ function createProject(){
   closeModal();
   ['f-code','f-name','f-client','f-resp','f-desc'].forEach(id=>document.getElementById(id).value='');
   saveState();
+  closeModal('modalOverlay');
   openProject(p.id);
 }
 function openProject(id){
