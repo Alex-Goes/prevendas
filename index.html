@@ -1159,6 +1159,25 @@ body{background:var(--bg)}
 .import-table .td-skip{color:var(--rd);font-size:10px}
 .import-table .td-ok{color:var(--gr);font-size:10px}
 
+/* ═══ GERENCIADOR DE CATEGORIAS ═══ */
+.cat-mgr-item{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;
+  border:1px solid var(--bd);border-radius:9px;margin-bottom:6px;
+  background:var(--s1);transition:.12s;
+}
+.cat-mgr-item:hover{border-color:var(--blb);background:var(--bls)}
+.cmi-drag{color:var(--t3);cursor:grab;font-size:14px;flex-shrink:0}
+.cmi-ico{font-size:18px;flex-shrink:0;width:24px;text-align:center}
+.cmi-info{flex:1;min-width:0}
+.cmi-label{font-size:13px;font-weight:600;color:var(--tx)}
+.cmi-disc{font-size:10px;color:var(--t3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.8px}
+.cmi-count{font-family:var(--mono);font-size:11px;color:var(--t3);flex-shrink:0}
+.cmi-actions{display:flex;gap:4px;flex-shrink:0}
+.cmi-btn{padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:transparent;cursor:pointer;font-size:11px;color:var(--t2);transition:.12s}
+.cmi-btn:hover{border-color:var(--bl);color:var(--bl);background:var(--bls)}
+.cmi-btn.danger:hover{border-color:var(--rd);color:var(--rd);background:var(--rds)}
+.cat-disc-header{font-size:9px;font-weight:700;letter-spacing:1.5px;color:var(--t3);text-transform:uppercase;padding:12px 0 6px;border-bottom:1px solid var(--bd);margin-bottom:6px}
+
 </style>
 </head>
 <body>
@@ -1268,7 +1287,10 @@ body{background:var(--bg)}
         <!-- Sidebar de categorias -->
         <aside class="cat-sidebar">
           <div class="cs-header">
-            <div class="cs-title">Categorias</div>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div class="cs-title">Categorias</div>
+              <button class="btn xs ghost" onclick="openCatManager()" title="Gerenciar categorias" style="padding:3px 7px;font-size:11px">⚙ Editar</button>
+            </div>
             <div class="cs-count" id="csCounts"></div>
           </div>
           <div class="cs-list" id="csCatList"></div>
@@ -1342,6 +1364,55 @@ body{background:var(--bg)}
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- MODAL GERENCIAR CATEGORIAS -->
+<div class="overlay" id="modalCatManager">
+  <div class="modal" style="max-width:640px;max-height:85vh;display:flex;flex-direction:column">
+    <h3>⚙ Gerenciar Categorias</h3>
+    <div class="msub">Crie, renomeie, reordene e organize todas as categorias do catálogo.</div>
+
+    <div style="flex:1;overflow-y:auto;margin:0 -28px;padding:0 28px">
+      <div id="catManagerList"></div>
+    </div>
+
+    <div style="border-top:1px solid var(--bd);margin-top:16px;padding-top:16px;display:flex;gap:8px;justify-content:space-between">
+      <button class="btn success" onclick="openNewCatForm()">+ Nova categoria</button>
+      <button class="btn ghost" onclick="closeModal('modalCatManager')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL NOVA / EDITAR CATEGORIA -->
+<div class="overlay" id="modalCatEdit">
+  <div class="modal" style="max-width:480px">
+    <h3 id="catEditTitle">Nova categoria</h3>
+    <div class="form-row">
+      <label>Nome da categoria *</label>
+      <input id="catEditLabel" placeholder="ex: Fibra Óptica">
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Ícone (emoji)</label>
+        <input id="catEditIco" placeholder="ex: 🔆" maxlength="4" style="font-size:20px">
+      </div>
+      <div class="form-row">
+        <label>Cor</label>
+        <input id="catEditCor" type="color" value="#2563eb" style="height:38px;padding:2px">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Disciplina (grupo na sidebar)</label>
+      <input id="catEditDisciplina" placeholder="ex: ELETRODUTOS, CFTV, REDE...">
+      <div style="font-size:11px;color:var(--t3);margin-top:4px">
+        Disciplinas existentes: <span id="catEditDisciplinasExist"></span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn ghost" onclick="closeModal('modalCatEdit')">Cancelar</button>
+      <button class="btn primary" onclick="saveCatEdit()">Salvar categoria</button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL IMPORTAR LISTA -->
 <div class="overlay" id="modalImport">
@@ -2598,7 +2669,7 @@ function exportCSV(){
 /* Definição das categorias e seus campos técnicos.
    Estrutura: cada categoria tem campos universais + campos específicos.
    Isso implementa a ontologia "categoria_atributo" projetada na arquitetura. */
-const CAT_DEFS = [
+let CAT_DEFS = [
   {
     id:'CAMERA', label:'Câmeras IP', ico:'📷', disciplina:'CFTV',
     cor:'#2563eb',
@@ -3250,6 +3321,12 @@ function renderItemForm(){
 
       <div class="ifp-section">
         <div class="ifp-section-title">${cat?.ico} Identificação <span>${cat?.label}</span></div>
+        <div class="ifp-row">
+          <label>Categoria</label>
+          <select onchange="if(isEdit&&catState.selectedId){moveItemToCat(catState.selectedId,this.value)}else{catState.activeCat=this.value}" ${isBuiltin?'disabled':''}>
+            ${CAT_DEFS.map(c=>`<option value="${c.id}" ${catState.activeCat===c.id?'selected':''}>${c.disciplina} › ${c.label}</option>`).join('')}
+          </select>
+        </div>
         ${!isElet ? `
         <div class="ifp-row">
           <label>Fabricante</label>
@@ -4117,6 +4194,172 @@ function getUserCatalog(){ return CATALOG.filter(x=>x.user && !x.auto); }
 function saveState(){ const ap=proj(); if(ap) DB.saveProject(ap); }
 
 
+
+// ═══════════════════════════════════════════════════════════
+// GERENCIADOR DE CATEGORIAS
+// ═══════════════════════════════════════════════════════════
+let catEditId = null; // null = nova categoria
+
+function openCatManager(){
+  renderCatManagerList();
+  document.getElementById('modalCatManager').classList.add('open');
+}
+
+function renderCatManagerList(){
+  const el = document.getElementById('catManagerList'); if(!el) return;
+  const disciplinas = {};
+  CAT_DEFS.forEach(c=>{
+    if(!disciplinas[c.disciplina]) disciplinas[c.disciplina]=[];
+    disciplinas[c.disciplina].push(c);
+  });
+
+  let html = '';
+  Object.entries(disciplinas).forEach(([disc, cats])=>{
+    html += `<div class="cat-disc-header">${disc}</div>`;
+    cats.forEach(c=>{
+      const count = CATALOG.filter(x=>x.cat===c.id && !x.auto).length;
+      const isCustom = !!c.custom;
+      html += `<div class="cat-mgr-item">
+        <span class="cmi-drag">⠿</span>
+        <span class="cmi-ico">${c.ico||'📦'}</span>
+        <div class="cmi-info">
+          <div class="cmi-label">${c.label}</div>
+          <div class="cmi-disc">${c.disciplina}</div>
+        </div>
+        <span class="cmi-count">${count} item${count!==1?'s':''}</span>
+        <div class="cmi-actions">
+          <button class="cmi-btn" onclick="openEditCatForm('${c.id}')">✏ Renomear</button>
+          ${isCustom && count===0
+            ? `<button class="cmi-btn danger" onclick="deleteCat('${c.id}')">✕</button>`
+            : isCustom
+            ? `<button class="cmi-btn danger" title="Mova os ${count} itens antes de excluir" disabled style="opacity:.4">✕</button>`
+            : ''}
+        </div>
+      </div>`;
+    });
+  });
+
+  el.innerHTML = html;
+}
+
+function openNewCatForm(){
+  catEditId = null;
+  document.getElementById('catEditTitle').textContent = 'Nova categoria';
+  document.getElementById('catEditLabel').value = '';
+  document.getElementById('catEditIco').value = '📦';
+  document.getElementById('catEditCor').value = '#2563eb';
+  document.getElementById('catEditDisciplina').value = '';
+  // Mostrar disciplinas existentes
+  const discs = [...new Set(CAT_DEFS.map(c=>c.disciplina))];
+  document.getElementById('catEditDisciplinasExist').textContent = discs.join(', ');
+  document.getElementById('modalCatEdit').classList.add('open');
+  setTimeout(()=>document.getElementById('catEditLabel').focus(), 100);
+}
+
+function openEditCatForm(id){
+  catEditId = id;
+  const cat = CAT_DEFS.find(c=>c.id===id); if(!cat) return;
+  document.getElementById('catEditTitle').textContent = 'Editar categoria';
+  document.getElementById('catEditLabel').value = cat.label;
+  document.getElementById('catEditIco').value = cat.ico||'📦';
+  document.getElementById('catEditCor').value = cat.cor||'#2563eb';
+  document.getElementById('catEditDisciplina').value = cat.disciplina;
+  const discs = [...new Set(CAT_DEFS.map(c=>c.disciplina))];
+  document.getElementById('catEditDisciplinasExist').textContent = discs.join(', ');
+  document.getElementById('modalCatEdit').classList.add('open');
+  setTimeout(()=>document.getElementById('catEditLabel').focus(), 100);
+}
+
+function saveCatEdit(){
+  const label = document.getElementById('catEditLabel').value.trim();
+  const ico = document.getElementById('catEditIco').value.trim() || '📦';
+  const cor = document.getElementById('catEditCor').value;
+  const disciplina = document.getElementById('catEditDisciplina').value.trim().toUpperCase();
+
+  if(!label){ toast('⚠ Nome é obrigatório'); return; }
+  if(!disciplina){ toast('⚠ Disciplina é obrigatória'); return; }
+
+  if(catEditId){
+    // Editar existente
+    const idx = CAT_DEFS.findIndex(c=>c.id===catEditId);
+    if(idx>=0){
+      CAT_DEFS[idx] = {...CAT_DEFS[idx], label, ico, cor, disciplina};
+      toast(`✓ "${label}" atualizada`);
+    }
+  } else {
+    // Nova categoria
+    const id = 'CUSTOM_' + label.toUpperCase().replace(/[^A-Z0-9]/g,'_').slice(0,20) + '_' + Date.now().toString(36).toUpperCase();
+    CAT_DEFS.push({
+      id, label, ico, cor, disciplina,
+      custom: true, // marca como categoria do usuário
+      campos_tecnicos:[
+        {key:'unidade', label:'Unidade de medida', tipo:'select',
+          opts:['peça','unidade','metro','rolo','barra','pacote','kit','caixa','kg','litro','par']}
+      ]
+    });
+    // Adicionar ao CAT_MAP
+    CAT_MAP_TO_CATALOG[id] = id;
+    toast(`✓ Categoria "${label}" criada`);
+  }
+
+  saveCatDefs(); // persistir no Supabase/localStorage
+  closeModal('modalCatEdit');
+  renderCatManagerList();
+  renderCatSidebar();
+}
+
+function deleteCat(id){
+  const cat = CAT_DEFS.find(c=>c.id===id); if(!cat || !cat.custom) return;
+  const count = CATALOG.filter(x=>x.cat===id).length;
+  if(count>0){ toast(`⚠ Mova os ${count} itens antes de excluir`); return; }
+  CAT_DEFS.splice(CAT_DEFS.findIndex(c=>c.id===id), 1);
+  delete CAT_MAP_TO_CATALOG[id];
+  saveCatDefs();
+  renderCatManagerList();
+  renderCatSidebar();
+  toast('Categoria removida');
+}
+
+// Persistir customizações de categorias no localStorage (simples)
+function saveCatDefs(){
+  const custom = CAT_DEFS.filter(c=>c.custom);
+  const overrides = CAT_DEFS.filter(c=>!c.custom).map(c=>({id:c.id, label:c.label, ico:c.ico, cor:c.cor, disciplina:c.disciplina}));
+  localStorage.setItem('kts_cat_custom', JSON.stringify(custom));
+  localStorage.setItem('kts_cat_overrides', JSON.stringify(overrides));
+}
+
+function loadCatDefs(){
+  try {
+    // Carregar sobrescrições de categorias fixas
+    const overrides = JSON.parse(localStorage.getItem('kts_cat_overrides')||'[]');
+    overrides.forEach(o=>{
+      const idx = CAT_DEFS.findIndex(c=>c.id===o.id);
+      if(idx>=0) CAT_DEFS[idx] = {...CAT_DEFS[idx], label:o.label, ico:o.ico, cor:o.cor, disciplina:o.disciplina};
+    });
+    // Carregar categorias customizadas
+    const custom = JSON.parse(localStorage.getItem('kts_cat_custom')||'[]');
+    custom.forEach(c=>{
+      if(!CAT_DEFS.find(x=>x.id===c.id)){
+        CAT_DEFS.push(c);
+        CAT_MAP_TO_CATALOG[c.id] = c.id;
+      }
+    });
+  } catch(e){ console.error('loadCatDefs:', e); }
+}
+
+// Mover item para outra categoria (chamado ao mudar o select no formulário)
+function moveItemToCat(itemId, newCatId){
+  const catDef = CAT_DEFS.find(c=>c.id===newCatId); if(!catDef) return;
+  const catKey = CAT_MAP_TO_CATALOG[newCatId]||newCatId;
+  const idx = CATALOG.findIndex(x=>x.id===itemId);
+  if(idx>=0 && CATALOG[idx].user){
+    CATALOG[idx].cat = catKey;
+    DB.saveCatalogItem(CATALOG[idx]);
+    toast(`✓ Item movido para ${catDef.label}`);
+  }
+}
+
+
 // ==================== BOOT ====================
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
@@ -4152,6 +4395,9 @@ async function bootApp() {
       CATALOG.push({...it, user:true});
     }
   });
+
+  // Carregar customizações de categorias salvas
+  loadCatDefs();
 
   // Importar câmeras base da planilha
   importCamerasFromPlanilha();
