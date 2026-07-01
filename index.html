@@ -1555,7 +1555,12 @@ function getFabLogo(fab){
 
 // ==================== HELPERS ====================
 function getItem(id){ return CATALOG.find(x=>x.id===id) }
-function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2) }
+function uid(){
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0, v=c=='x'?r:(r&0x3|0x8);
+    return v.toString(16);
+  });
+}
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2500) }
 function fmtDate(ts){ return new Date(ts).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'2-digit'}) }
 
@@ -4148,7 +4153,7 @@ async function bootApp() {
   // Demo project se não houver projetos salvos
   if(!state.projects.length){
     state.projects.push({
-      id: 'demo-001',
+      id: 'a0000000-0000-0000-0000-000000000001',
       code: 'KTS-2025-001',
       name: 'Projeto Demonstração',
       client: 'Cliente Exemplo',
