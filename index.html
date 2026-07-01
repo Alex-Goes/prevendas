@@ -4027,49 +4027,6 @@ function showImportStatus(type, msg){
 
 // ==================== PERSISTÊNCIA LOCAL (DB Layer) ====================
 // Esta camada será trocada por Supabase no deploy — só estas funções mudam
-const DB = {
-  _k: k => 'kts_v3_' + k,
-  get(k){ try{ return JSON.parse(localStorage.getItem(DB._k(k))); }catch{ return null; } },
-  set(k,v){ localStorage.setItem(DB._k(k), JSON.stringify(v)); DB._saved(); },
-  del(k){ localStorage.removeItem(DB._k(k)); },
-  _t: null,
-  _saved(){
-    const el = document.getElementById('saveStatus');
-    if(el){ el.textContent='salvando...'; clearTimeout(DB._t); DB._t=setTimeout(()=>{ el.textContent='✓ salvo'; setTimeout(()=>{ el.textContent=''; },2000); },400); }
-  }
-};
-
-function loadPersistedState(){
-  const saved = DB.get('projects');
-  if(saved && saved.length) state.projects = saved;
-  const savedCatalog = DB.get('catalog_user');
-  if(savedCatalog) {
-    // Adicionar itens do usuário ao CATALOG sem duplicar
-    savedCatalog.forEach(it=>{ if(!CATALOG.find(x=>x.id===it.id)) CATALOG.push(it); });
-  }
-}
-
-function saveState(){
-  const ap = proj();
-  if(ap) DB.saveProject(ap);
-}
-
-function saveUserCatalogItem(item){
-  const items = DB.get('catalog_user') || [];
-  const idx = items.findIndex(x=>x.id===item.id);
-  if(idx>=0) items[idx]=item; else items.push(item);
-  DB.set('catalog_user', items);
-  if(!CATALOG.find(x=>x.id===item.id)) CATALOG.push(item);
-  else { const i=CATALOG.findIndex(x=>x.id===item.id); CATALOG[i]=item; }
-}
-
-function deleteUserCatalogItem(id){
-  const items = (DB.get('catalog_user')||[]).filter(x=>x.id!==id);
-  DB.set('catalog_user', items);
-  const i=CATALOG.findIndex(x=>x.id===id);
-  if(i>=0) CATALOG.splice(i,1);
-}
-
 // ==================== BOOT ====================
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
