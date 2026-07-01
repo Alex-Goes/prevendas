@@ -2883,7 +2883,7 @@ function openCadastro(){
 function renderCadastro(){
   renderCatSidebar();
   renderItemList();
-  closeItemForm();
+  closeIFP();
 }
 
 // ---- Sidebar de categorias ----
@@ -2922,7 +2922,7 @@ function setCatAtivo(id){
   catState.activeCat = id;
   catState.activeFab = null; // resetar fabricante ao trocar categoria
   catState.selectedId = null;
-  closeItemForm();
+  closeIFP();
   renderCatSidebar();
   renderItemList();
 }
@@ -3140,7 +3140,7 @@ function openItemForm(mode, id){
   document.getElementById('itemFormPanel').classList.add('open');
 }
 
-function closeItemForm(){
+function closeIFP(){
   document.getElementById('itemFormPanel').classList.remove('open');
   catState.formMode = null;
   catState.selectedId = null;
@@ -3221,7 +3221,7 @@ function renderItemForm(){
   document.getElementById('itemFormContent').innerHTML=`
     <div class="ifp-header">
       <div class="ifp-title">${isEdit?'Editar equipamento':'Novo equipamento'}</div>
-      <button class="ifp-close" onclick="closeItemForm()">✕</button>
+      <button class="ifp-close" onclick="closeIFP()">✕</button>
     </div>
     <div class="ifp-body">
       ${isBuiltin?`<div style="background:var(--ams);border:1px solid var(--amb);border-radius:7px;padding:9px 12px;margin-bottom:16px;font-size:11.5px;color:#78350f">
@@ -3520,30 +3520,33 @@ function saveItem(){
         u:parseInt(d.altura_u)||0, w:parseFloat(d.consumo_w)||0,
         attrs
       };
+      DB.saveCatalogItem(CATALOG[idx]); // salvar no Supabase
       toast('✓ Equipamento atualizado');
     }
   } else {
     // Novo item
-    const id = catState.activeCat.toLowerCase()+'-'+uid().slice(0,6);
-    CATALOG.push({
+    const id = uid(); // UUID v4 completo
+    const newItem = {
       id, cat:catKey, fab:d.fab||'—', nome:d.nome, desc:d.desc||'',
       u:parseInt(d.altura_u)||0, w:parseFloat(d.consumo_w)||0,
-      attrs, user:true // marca como item do usuário
-    });
+      attrs, user:true
+    };
+    CATALOG.push(newItem);
     catState.selectedId = id;
+    DB.saveCatalogItem(newItem); // salvar no Supabase
     toast(`✓ ${d.nome} adicionado ao catálogo`);
   }
 
   renderCatSidebar();
   renderItemList();
-  closeItemForm();
+  closeIFP();
 }
 
 function deleteItem(id){
   const idx = CATALOG.findIndex(x=>x.id===id && x.user);
   if(idx<0){ toast('Itens base não podem ser excluídos'); return; }
   CATALOG.splice(idx,1);
-  closeItemForm();
+  closeIFP();
   renderCatSidebar();
   renderItemList();
   toast('Item removido');
