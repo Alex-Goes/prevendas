@@ -1522,9 +1522,8 @@ const COMP_RULES = [
 ];
 
 function getCatalog(){
-  const userItems = getUserCatalog();
-  const base = CATALOG.filter(x => !userItems.find(u=>u.id===x.id));
-  return [...base, ...userItems];
+  // CATALOG já contém tudo (base + Supabase) carregado no boot
+  return CATALOG;
 }
 
 
@@ -4145,7 +4144,13 @@ async function bootApp() {
   // Carregar catálogo do usuário do Supabase
   const catSupa = await DB.getCatalogUser();
   catSupa.forEach(it => {
-    if(!CATALOG.find(x=>x.id===it.id)) CATALOG.push(it);
+    const idx = CATALOG.findIndex(x=>x.id===it.id);
+    if(idx >= 0) {
+      // Atualizar item existente COM user:true (pode ter sido adicionado sem)
+      CATALOG[idx] = {...CATALOG[idx], ...it, user:true};
+    } else {
+      CATALOG.push({...it, user:true});
+    }
   });
 
   // Importar câmeras base da planilha
