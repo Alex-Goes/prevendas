@@ -3098,6 +3098,7 @@ function renderItemList(){
           <div>
             <div class="cil-nome">${it.nome}</div>
             <div style="margin-top:4px">${mainAttr}</div>
+            ${it.attrs?.diferenciais ? `<div style="margin-top:4px;font-size:10.5px;color:var(--t2);line-height:1.5;white-space:pre-line;max-height:36px;overflow:hidden;mask-image:linear-gradient(to bottom,#000 60%,transparent)">${it.attrs.diferenciais}</div>` : ''}
           </div>
           <div><span class="cil-badge ${isUser?'user':'builtin'}">${isUser?'meu':'base'}</span></div>
         </div>`;
@@ -3218,6 +3219,8 @@ function openItemForm(mode, id){
       catState.formData = {
         fab: it.fab==='—'?'':it.fab,
         nome: it.nome, desc: it.desc,
+        diferenciais: it.attrs?.diferenciais||'',
+        analiticos: it.attrs?.analiticos||[],
         altura_u: it.u ?? 0, consumo_w: it.w ?? '',
         ...(it.attrs || {})
       };
@@ -3378,6 +3381,23 @@ function renderItemForm(){
         <div class="ifp-section-title">${isElet ? "📦 Unidade de medida" : "⚙ Especificações técnicas"}</div>
         ${tecHtml||'<div style="font-size:12px;color:var(--t3)">Nenhum campo técnico para esta categoria.</div>'}
       </div>
+
+      ${!isElet ? `
+      <div class="ifp-section">
+        <div class="ifp-section-title">⭐ Diferenciais e analíticos</div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:6px">
+          Analíticos embarcados, certificações, diferenciais comerciais, observações técnicas.
+          Campo livre — escreva o que precisar.
+        </div>
+        <textarea
+          placeholder="Ex: Detecção de capacete (EPI)&#10;Reconhecimento de placa LPR&#10;Certificação IP67 + IK10&#10;Ideal para ambientes externos industriais"
+          style="width:100%;min-height:90px;background:var(--s2);border:1px solid var(--bd);border-radius:9px;padding:9px 12px;font-size:12px;color:var(--tx);resize:vertical;font-family:var(--sans);line-height:1.5"
+          oninput="setFormField('diferenciais',this.value)"
+          ${isBuiltin?'disabled':''}
+        >${d.diferenciais||''}</textarea>
+        <div id="dsStatus" style="display:none;border-radius:8px;padding:9px 12px;font-size:12px;margin-top:8px"></div>
+      </div>
+      ` : ''}
     </div>
     <div class="ifp-footer">
       ${isEdit&&!isBuiltin?`<button class="btn danger" onclick="deleteItem('${catState.selectedId}')">Excluir</button>`:''}
@@ -3606,6 +3626,11 @@ function saveItem(){
   });
   // Garantir campo consumo_w no attrs para câmeras
   if(d.consumo_w) attrs.consumo_w = parseFloat(d.consumo_w)||0;
+  if(d.bitrate_mbps) attrs.bitrate_mbps = parseFloat(d.bitrate_mbps)||0;
+  // Campo livre de diferenciais
+  if(d.diferenciais?.trim()) attrs.diferenciais = d.diferenciais.trim();
+  // Analíticos extraídos pelo motor
+  if(d.analiticos?.length) attrs.analiticos = d.analiticos;
   if(d.bitrate_mbps) attrs.bitrate_mbps = parseFloat(d.bitrate_mbps)||0;
 
   if(catState.formMode==='edit' && catState.selectedId){
@@ -4380,6 +4405,289 @@ function moveItemToCat(itemId, newCatId){
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════
+// MOTOR DE EXTRAÇÃO DE DATASHEET (regex, gratuito, offline)
+// ═══════════════════════════════════════════════════════════
+
+function dsOnPaste(el){
+  const txt = el.value;
+  const count = document.getElementById('dsPasteCount');
+  const btn = document.getElementById('dsBtnExtract');
+  if(count) count.textContent = txt.length > 0 ? txt.length + ' chars' : '';
+  if(btn) btn.disabled = txt.trim().length < 20;
+}
+
+function dsExtractFromText(){
+  const txt = (document.getElementById('dsPasteArea')?.value || '').trim();
+  if(!txt){ toast('⚠ Cole o texto do datasheet primeiro'); return; }
+
+  const catId = catState.activeCat;
+  let preenchidos = 0;
+  const naoMapeados = []; // informações extras que o sistema não tem campo
+
+  // ── Helpers ──────────────────────────────────────────────
+  function set(key, val){
+    if(val == null || val === '' || val === false) return;
+    catState.formData[key] = val;
+    preenchidos++;
+  }
+  function num(patterns){
+    for(const p of (Array.isArray(patterns)?patterns:[patterns])){
+      const m = txt.match(p);
+      if(m) return parseFloat((m[1]||'').replace(',','.'));
+    }
+    return null;
+  }
+  function str(patterns){
+    for(const p of (Array.isArray(patterns)?patterns:[patterns])){
+      const m = txt.match(p);
+      if(m) return (m[1]||'').trim();
+    }
+    return null;
+  }
+  function has(patterns){
+    for(const p of (Array.isArray(patterns)?patterns:[patterns])){
+      if(p.test(txt)) return true;
+    }
+    return false;
+  }
+  function findAll(pattern){
+    return [...txt.matchAll(pattern)].map(m=>m[1]?.trim()).filter(Boolean);
+  }
+
+  // ── FABRICANTE ────────────────────────────────────────────
+  const fabMap = {
+    'hikvision':'HIKVISION','intelbras':'INTELBRAS','vivotek':'VIVOTEK',
+    'axis':'AXIS','dahua':'DAHUA','bosch':'BOSCH','hanwha':'HANWHA',
+    'uniview':'UNIVIEW','cp plus':'CP PLUS','giga':'GIGA','samsung':'SAMSUNG',
+    'pelco':'PELCO','flir':'FLIR','mobotix':'MOBOTIX','avigilon':'AVIGILON',
+    'milestone':'MILESTONE','genetec':'GENETEC'
+  };
+  for(const [key,val] of Object.entries(fabMap)){
+    if(new RegExp(key,'i').test(txt)){ set('fab',val); break; }
+  }
+
+  // ── MODELO ────────────────────────────────────────────────
+  const modelo = str([
+    /(?:Modelo|Model|Part\s*(?:No|Number|#))[:\s]+([A-Z0-9][\w\-\.\/\(\)]+(?:\s[A-Z0-9][\w\-\.\/]+){0,3})/i,
+    /^([A-Z]{2,}[\-\s][A-Z0-9][\w\-\.\/]+(?:\s[A-Z0-9][\w\-\.\/]+){0,2})/m,
+  ]);
+  if(modelo && modelo.length > 2 && modelo.length < 50) set('nome', modelo);
+
+  // ── CÂMERA ────────────────────────────────────────────────
+  if(['CAMERA'].includes(catId)){
+
+    // Resolução
+    const res = num([
+      /(\d+(?:[,\.]\d+)?)\s*(?:megapixel|MP|Mpx)/i,
+      /(\d+)\s*MP\b/,
+    ]) || (()=>{
+      const m = txt.match(/(\d{3,5})\s*[×xX]\s*(\d{3,5})/);
+      return m ? Math.round(parseInt(m[1])*parseInt(m[2])/1e6*10)/10 : null;
+    })();
+    if(res) set('resolucao_mp', parseFloat(res.toFixed(1)));
+
+    // IR
+    const ir = num([
+      /IR\s*(?:Range|Distance|Alcance|Iluminação)?[:\s]+(\d+)\s*m/i,
+      /(\d+)\s*m\s*(?:IR|infrared)/i,
+      /Infrared\s*(?:Range|Distance)[:\s]+(\d+)/i,
+      /Alcance\s*(?:IR|infravermelho)[:\s]+(\d+)/i,
+    ]);
+    if(ir) set('ir', ir);
+
+    // Consumo
+    const w = num([
+      /(?:Max\.?\s*)?Power\s*Consumption[:\s]+(\d+(?:[,\.]\d+)?)\s*W/i,
+      /Consumo\s*(?:Máximo|de\s*Energia)?[:\s]+(\d+(?:[,\.]\d+)?)\s*W/i,
+      /(\d+(?:[,\.]\d+)?)\s*W\s*(?:máx|max|\(max\))/i,
+      /Potência[:\s]+(\d+(?:[,\.]\d+)?)\s*W/i,
+    ]);
+    if(w) set('consumo_w', w);
+
+    // Bitrate
+    const br = num([
+      /(?:Max\.?\s*)?(?:Bit\s*Rate|Bitrate)[:\s]+(\d+(?:[,\.]\d+)?)\s*Mbps/i,
+      /(\d+(?:[,\.]\d+)?)\s*Mbps/i,
+    ]);
+    if(br && br < 200) set('bitrate_mbps', br);
+
+    // IP
+    if(has(/IP\s*67/i)) set('ip', 67);
+    else if(has(/IP\s*66/i)) set('ip', 66);
+    else if(has(/IP\s*65/i)) set('ip', 65);
+    else { const ip = num([/IP\s*6(\d)/i]); if(ip) set('ip', parseFloat('6'+ip)); }
+
+    // PoE
+    if(has([/PoE\+\+|802\.3bt/i])) set('classe_poe','bt');
+    else if(has([/PoE\+|802\.3at/i])) set('classe_poe','at');
+    else if(has([/PoE|802\.3af/i])) set('classe_poe','af');
+
+    // Booleans
+    if(has([/ONVIF/i])) set('onvif',true);
+    if(has([/WDR|Wide\s*Dynamic/i])) set('wdr',true);
+    if(has([/(?:built.?in\s*)?mic(?:rophone)?|áudio\s*bidirecional|two.?way\s*audio/i])) set('audio',true);
+
+    // Tipo
+    if(has([/bullet/i])) set('tipo','bullet');
+    else if(has([/speed\s*dome|ptz|pan.?tilt/i])) set('tipo','ptz');
+    else if(has([/fisheye|olho.?de.?peixe/i])) set('tipo','fisheye');
+    else if(has([/box\s*camera/i])) set('tipo','box');
+    else if(has([/multi.?sensor|panorâm/i])) set('tipo','multi-sensor');
+    else if(has([/dome/i])) set('tipo','dome');
+
+    // SD Card
+    if(has([/micro.?sd|sd.?card|slot.?sd/i])) set('sd_card',true);
+    const sdCap = num([/(\d+)\s*GB\s*(?:micro.?sd|sd)/i, /(?:micro.?sd|sd\s*card)[^0-9]*(\d+)\s*GB/i]);
+    if(sdCap) set('sd_cap_gb', sdCap);
+
+    // Analíticos estruturados
+    const analMap = [
+      [/detec[çc][aã]o\s*de\s*pessoa|people\s*detect|human\s*detect/i,'detecção de pessoa'],
+      [/detec[çc][aã]o\s*de\s*ve[íi]culo|vehicle\s*detect/i,'detecção de veículo'],
+      [/reconhec.*placa|lpr|alpr|license\s*plate/i,'reconhecimento de placa (LPR)'],
+      [/reconhec.*facial|face\s*recog/i,'reconhecimento facial'],
+      [/contagem\s*de\s*pessoa|people\s*count/i,'contagem de pessoas'],
+      [/linha\s*virtual|virtual\s*line|tripwire/i,'linha virtual'],
+      [/zona\s*virtual|intrusion\s*detect|area\s*intrusion/i,'zona virtual'],
+      [/rastreamento|tracking/i,'rastreamento de objeto'],
+      [/comportamento\s*suspeito|loitering/i,'comportamento suspeito'],
+      [/detec[çc][aã]o\s*de\s*incêndio|fire\s*detect/i,'detecção de incêndio'],
+      [/capacete|hardhat/i,'detecção de capacete (EPI)'],
+      [/colete|vest\s*detect/i,'detecção de colete (EPI)'],
+      [/máscara|mask\s*detect/i,'detecção de máscara'],
+      [/fumaça|smoke\s*detect/i,'detecção de fumaça'],
+    ];
+    const analSel = analMap.filter(([p])=>p.test(txt)).map(([,n])=>n);
+    if(analSel.length > 0){
+      set('analitico', true);
+      set('analiticos', analSel);
+    }
+
+    // ── Informações extras (campo livre de diferenciais) ──
+    const extras = [];
+
+    // Lente
+    const lente = str([
+      /Lente[:\s]+(\d+(?:[,\.]\d+)?(?:\s*[-~]\s*\d+(?:[,\.]\d+)?)?\s*mm)/i,
+      /Focal\s*Length[:\s]+(\d+(?:[,\.]\d+)?(?:\s*[-~]\s*\d+(?:[,\.]\d+)?)?\s*mm)/i,
+    ]);
+    if(lente) extras.push('Lente: ' + lente);
+
+    // Temperatura de operação
+    const temp = str([
+      /(?:Operating|Operação|Temperatura)[^:]*:[^-\d]*(-?\d+\s*°?C?\s*(?:a|~|to|-)\s*\+?\d+\s*°?C?)/i,
+    ]);
+    if(temp) extras.push('Temperatura de operação: ' + temp);
+
+    // Certificações
+    const certs = findAll(/\b(CE|FCC|IC|UL|IK\d+|NEMA\s*\d+|ATEX|IECEx|IP\d+)\b/g);
+    const certsUniq = [...new Set(certs)].filter(c=>c!=='IP');
+    if(certsUniq.length) extras.push('Certificações: ' + certsUniq.join(', '));
+
+    // Codec
+    const codecs = [];
+    if(has([/H\.265\+|H265\+/i])) codecs.push('H.265+');
+    else if(has([/H\.265|H265/i])) codecs.push('H.265');
+    if(has([/H\.264\+|H264\+/i])) codecs.push('H.264+');
+    else if(has([/H\.264|H264/i])) codecs.push('H.264');
+    if(has([/MJPEG/i])) codecs.push('MJPEG');
+    if(codecs.length) extras.push('Codec: ' + codecs.join(', '));
+
+    // Zoom óptico (PTZ)
+    const zoom = num([/(\d+)\s*x\s*(?:optical|óptico)/i, /zoom\s*óptico[:\s]+(\d+)\s*x/i]);
+    if(zoom) extras.push('Zoom óptico: ' + zoom + 'x');
+
+    // ANR
+    if(has([/ANR|Automatic\s*Network\s*Replenishment/i])) extras.push('ANR (gravação de rede automática)');
+
+    // Slot SFP / fibra
+    if(has([/SFP|fibra\s*óptica|optical\s*fiber/i])) extras.push('Interface fibra óptica (SFP)');
+
+    // Entrada/saída de alarme
+    const alarmeIn = num([/alarm(?:e)?\s*input[:\s]+(\d+)/i, /entrada[s]?\s*de\s*alarme[:\s]+(\d+)/i]);
+    const alarmeOut = num([/alarm(?:e)?\s*output[:\s]+(\d+)/i, /sa[íi]da[s]?\s*de\s*alarme[:\s]+(\d+)/i]);
+    if(alarmeIn) extras.push(`Entradas de alarme: ${alarmeIn}`);
+    if(alarmeOut) extras.push(`Saídas de alarme: ${alarmeOut}`);
+
+    // Deep learning / IA embarcada
+    if(has([/deep\s*learning|neural\s*network|IA\s*embarcada|edge\s*AI/i]))
+      extras.push('IA embarcada (Deep Learning)');
+
+    // Analíticos extras não mapeados
+    const analExtras = [
+      [/defocus\s*detect/i,'Detecção de desfoque (Defocus)'],
+      [/scene\s*change|cena\s*alterada/i,'Detecção de alteração de cena'],
+      [/audio\s*detect|detec.*áudio/i,'Detecção por áudio'],
+      [/cross\s*counting|bidirecional/i,'Contagem bidirecional'],
+      [/heat\s*map/i,'Mapa de calor (Heatmap)'],
+      [/queue\s*management|fila/i,'Gestão de filas'],
+      [/perimeter\s*protect/i,'Proteção de perímetro'],
+    ];
+    analExtras.filter(([p])=>p.test(txt)).forEach(([,n])=>extras.push(n));
+
+    // Salvar campo livre de diferenciais
+    if(extras.length > 0){
+      const atual = catState.formData.diferenciais || '';
+      const novo = extras.join('\n');
+      set('diferenciais', atual ? atual + '\n' + novo : novo);
+    }
+
+  } // fim if CAMERA
+
+  // ── NVR / GRAVADOR ────────────────────────────────────────
+  else if(catId === 'NVR'){
+    const canais = num([/(\d+)\s*(?:canal|channel|ch(?:annel)?s?)\b/i]);
+    if(canais && canais <= 128) set('canais', canais);
+    const hds = num([/(\d+)\s*(?:HD|HDD|hard\s*disk)/i]);
+    if(hds && hds <= 16) set('max_hds', hds);
+    if(has([/PoE/i])) set('poe_integrado', true);
+    const extras = [];
+    const bw = num([/(\d+)\s*Mbps\s*(?:incoming|bandwidth)/i]);
+    if(bw) extras.push('Largura de banda: ' + bw + 'Mbps');
+    const res = str([/resolução\s*(?:de\s*saída|HDMI)[:\s]+([^\n,]+)/i]);
+    if(res) extras.push('Saída: ' + res.trim());
+    if(extras.length) set('diferenciais', extras.join('\n'));
+  }
+
+  // ── SWITCH ────────────────────────────────────────────────
+  else if(catId === 'SWITCH'){
+    const portas = num([/(\d+)\s*(?:PoE\s*)?(?:port|porta)/i]);
+    if(portas) set('portas_total', portas);
+    const budget = num([/PoE\s*budget[:\s]+(\d+)\s*W/i, /(\d+)\s*W\s*PoE/i]);
+    if(budget) set('poe_budget_w', budget);
+    if(has([/Giga|1000\s*Mbps|1\s*Gbps/i])) set('uplink_mbps', 1000);
+    if(has([/PoE/i])) set('tem_poe', true);
+    if(has([/gerenci|manag/i])) set('gerenciavel', true);
+  }
+
+  // ── Resultado ─────────────────────────────────────────────
+  renderItemForm();
+
+  const statusEl = document.getElementById('dsStatus');
+  if(statusEl){
+    statusEl.style.display = 'block';
+    if(preenchidos >= 4){
+      statusEl.style.background = 'var(--grs)';
+      statusEl.style.border = '1px solid var(--grb)';
+      statusEl.style.color = '#166534';
+      statusEl.innerHTML = `✓ <b>${preenchidos} campos</b> extraídos — revise e salve`;
+    } else if(preenchidos > 0){
+      statusEl.style.background = 'var(--ams)';
+      statusEl.style.border = '1px solid var(--amb)';
+      statusEl.style.color = '#78350f';
+      statusEl.innerHTML = `⚠ <b>${preenchidos} campo${preenchidos!==1?'s':''}</b> extraído${preenchidos!==1?'s':''} — cole mais texto do datasheet para melhores resultados`;
+    } else {
+      statusEl.style.background = 'var(--rds)';
+      statusEl.style.border = '1px solid var(--rdb)';
+      statusEl.style.color = 'var(--rd)';
+      statusEl.textContent = '✗ Nenhum campo identificado — verifique se colou o texto correto';
+    }
+  }
+  if(preenchidos > 0) toast('✓ ' + preenchidos + ' campos extraídos');
+  else toast('⚠ Nenhum campo identificado');
+}
 
 // ==================== BOOT ====================
 document.addEventListener('keydown',e=>{
