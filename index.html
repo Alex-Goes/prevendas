@@ -4027,6 +4027,92 @@ function showImportStatus(type, msg){
 
 // ==================== PERSISTÊNCIA LOCAL (DB Layer) ====================
 // Esta camada será trocada por Supabase no deploy — só estas funções mudam
+// ==================== SUPABASE DB LAYER ====================
+const SUPA_URL = 'https://pizvimqjjzgbamonhnfd.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpenZpbXFqanpnYmFtb25obmZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MTIzMjUsImV4cCI6MjA5ODQ4ODMyNX0.ISgahve5YNM4BtU9Ysi5eryWfvEkKnHKfiJJWoL_krU';
+
+function setSaveStatus(msg, color){
+  const el = document.getElementById('saveStatus');
+  if(el){ el.textContent=msg; el.style.color=color||'var(--t3)'; }
+}
+
+async function supa(method, table, body, query){
+  query = query||'';
+  const res = await fetch(SUPA_URL+'/rest/v1/'+table+query, {
+    method,
+    headers: {
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer '+SUPA_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if(!res.ok) throw new Error(await res.text());
+  const t = await res.text();
+  return t ? JSON.parse(t) : null;
+}
+
+const DB = {
+  async getProjects(){
+    try{ return await supa('GET','projects','','?order=updated_at.desc')||[]; }
+    catch(e){ console.error('getProjects:',e); return []; }
+  },
+  async saveProject(p){
+    setSaveStatus('● salvando','var(--am)');
+    try{
+      await supa('POST','projects',{
+        id:p.id, code:p.code, name:p.name, client:p.client,
+        resp:p.resp, description:p.desc, status:p.status,
+        modules:p.modules||{}, rack:p.rack||{},
+        updated_at: new Date().toISOString()
+      },'?on_conflict=id');
+      setSaveStatus('✓ salvo','var(--gr)');
+      setTimeout(()=>setSaveStatus(''),2000);
+    }catch(e){ setSaveStatus('✗ erro','var(--rd)'); console.error(e); }
+  },
+  async deleteProject(id){
+    try{ await supa('DELETE','projects','','?id=eq.'+id); }catch(e){ console.error(e); }
+  },
+  async getCatalogUser(){
+    try{
+      const rows = await supa('GET','catalog_items','','?order=created_at.asc')||[];
+      return rows.map(r=>({...r, user:true, desc:r.descricao||'', attrs:r.attrs||{}}));
+    }catch(e){ console.error('getCatalogUser:',e); return []; }
+  },
+  async saveCatalogItem(item){
+    setSaveStatus('● salvando','var(--am)');
+    try{
+      await supa('POST','catalog_items',{
+        id:item.id, cat:item.cat, fab:item.fab||'—',
+        nome:item.nome, descricao:item.desc||'',
+        u:item.u||0, w:item.w||0, attrs:item.attrs||{}
+      },'?on_conflict=id');
+      setSaveStatus('✓ salvo','var(--gr)');
+      setTimeout(()=>setSaveStatus(''),2000);
+    }catch(e){ setSaveStatus('✗ erro','var(--rd)'); console.error(e); }
+  },
+  async deleteCatalogItem(id){
+    try{ await supa('DELETE','catalog_items','','?id=eq.'+id); }catch(e){ console.error(e); }
+  },
+  async saveCatalogBulk(items){
+    setSaveStatus('● salvando '+items.length+' itens...','var(--am)');
+    try{
+      await supa('POST','catalog_items',items.map(it=>({
+        id:it.id, cat:it.cat, fab:it.fab||'—',
+        nome:it.nome, descricao:it.desc||'',
+        u:it.u||0, w:it.w||0, attrs:it.attrs||{}
+      })),'?on_conflict=id');
+      setSaveStatus('✓ '+items.length+' salvos','var(--gr)');
+      setTimeout(()=>setSaveStatus(''),3000);
+    }catch(e){ setSaveStatus('✗ erro','var(--rd)'); console.error(e); }
+  }
+};
+
+function getUserCatalog(){ return CATALOG.filter(x=>x.user && !x.auto); }
+function saveState(){ const ap=proj(); if(ap) DB.saveProject(ap); }
+
+
 // ==================== BOOT ====================
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
